@@ -1,0 +1,17 @@
+{
+  "location": {
+    "latitude": 35.7846,
+    "longitude": -80.8883,
+    "name": "Statesville",
+    "state": "NC"
+  },
+  "branding": {
+    "stationId": "ICAW",
+    "stationName": "Statesville Weather Station",
+    "logoPath": "/images/logo.svg"
+  },
+  "display": {
+    "temperatureUnit": "F",
+    "timeFormat": "12h"
+  }
+}
