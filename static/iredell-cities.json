@@ -1,70 +1,70 @@
 {
-    "type": "FeatureCollection",
-    "features": [
-        {
-            "type": "Feature",
-            "properties": {
-                "name": "Statesville"
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [
-                    -80.8873,
-                    35.7826
-                ]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {
-                "name": "Mooresville"
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [
-                    -80.8101,
-                    35.5849
-                ]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {
-                "name": "Troutman"
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [
-                    -80.8881,
-                    35.7007
-                ]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {
-                "name": "Harmony"
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [
-                    -80.7710,
-                    35.9570
-                ]
-            }
-        },
-        {
-            "type": "Feature",
-            "properties": {
-                "name": "Love Valley"
-            },
-            "geometry": {
-                "type": "Point",
-                "coordinates": [
-                    -80.9881,
-                    35.9899
-                ]
-            }
-        }
-    ]
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Statesville"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.8873,
+          35.7826
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Mooresville"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.8101,
+          35.5849
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Troutman"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.8881,
+          35.7007
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Harmony"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.7710,
+          35.9570
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Love Valley"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.9881,
+          35.9899
+        ]
+      }
+    }
+  ]
 }

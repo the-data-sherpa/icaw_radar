@@ -10,11 +10,14 @@ export default define.page(function App({ Component }) {
           content="width=1920, height=1080, initial-scale=1.0"
         />
         <title>ICAW Weather Radar</title>
+        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/images/icaw-logo.png" />
+        <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
           href="https://fonts.gstatic.com"
-          crossorigin=""
+          crossorigin="anonymous"
         />
         <link
           href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@700&family=Roboto+Mono:wght@400;700&display=swap"

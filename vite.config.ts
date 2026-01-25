@@ -3,4 +3,5 @@ import { fresh } from "@fresh/plugin-vite";
 
 export default defineConfig({
   plugins: [fresh()],
+  publicDir: "static",
 });

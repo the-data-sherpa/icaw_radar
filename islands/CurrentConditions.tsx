@@ -1,5 +1,5 @@
 import { useSignal } from "@preact/signals";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { WeatherIcon } from "@/components/WeatherIcon.tsx";
 
 interface Conditions {
@@ -14,35 +14,83 @@ interface Conditions {
   icon: string | null;
 }
 
+function formatTimeAgo(date: Date): string {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+  if (seconds < 60) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return "1m ago";
+  if (minutes < 60) return `${minutes}m ago`;
+  return ">1h ago";
+}
+
 export default function CurrentConditions() {
   const conditions = useSignal<Conditions | null>(null);
-  const loading = useSignal(true);
+  const initialLoading = useSignal(true); // Only true on first load
   const error = useSignal<string | null>(null);
+  const lastUpdate = useSignal<Date>(new Date());
+  const prevTemp = useRef<number | null>(null);
+  const tempAnimating = useSignal(false);
+  const freshnessText = useSignal("Just now");
+  const isRefreshing = useSignal(false); // Track background refresh
+
+  // Update freshness text every 30 seconds
+  useEffect(() => {
+    const updateFreshness = () => {
+      freshnessText.value = formatTimeAgo(lastUpdate.value);
+    };
+    updateFreshness();
+    const interval = setInterval(updateFreshness, 30000);
+    return () => clearInterval(interval);
+  }, [lastUpdate.value]);
 
   useEffect(() => {
+    let isInitial = true;
+
     async function fetchConditions() {
+      // Only show refreshing indicator, never clear existing data
+      if (!isInitial) {
+        isRefreshing.value = true;
+      }
+
       try {
         const response = await fetch("/api/weather");
         if (!response.ok) {
           throw new Error("Failed to fetch weather");
         }
         const data = await response.json();
+
+        // Check if temperature changed for animation
+        if (
+          prevTemp.current !== null && data.temperature !== prevTemp.current
+        ) {
+          tempAnimating.value = true;
+          setTimeout(() => tempAnimating.value = false, 400);
+        }
+        prevTemp.current = data.temperature;
+
+        // Update data (no flash because we never cleared it)
         conditions.value = data;
+        lastUpdate.value = new Date();
         error.value = null;
       } catch (e) {
         console.error("Weather fetch error:", e);
-        error.value = "Unable to load weather";
+        // Only show error on initial load, keep showing old data on refresh fail
+        if (isInitial) {
+          error.value = "Unable to load weather";
+        }
       } finally {
-        loading.value = false;
+        initialLoading.value = false;
+        isRefreshing.value = false;
+        isInitial = false;
       }
     }
 
     fetchConditions();
-    const interval = setInterval(fetchConditions, 60000); // Poll every 60 seconds
+    const interval = setInterval(fetchConditions, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  if (loading.value) {
+  if (initialLoading.value) {
     return (
       <div class="conditions">
         <div class="loading">
@@ -62,11 +110,16 @@ export default function CurrentConditions() {
   }
 
   const c = conditions.value;
+  const isStale = (new Date().getTime() - lastUpdate.value.getTime()) > 600000; // 10 minutes
 
   return (
     <div class="conditions">
       <div class="temperature-display">
-        <span class="temperature-value">
+        <span
+          class={`temperature-value ${
+            tempAnimating.value ? "value-updating" : ""
+          }`}
+        >
           {c.temperature !== null ? c.temperature : "--"}
         </span>
         <span class="temperature-unit">{c.temperatureUnit}</span>
@@ -98,6 +151,12 @@ export default function CurrentConditions() {
             {c.humidity !== null ? `${c.humidity}%` : "--"}
           </span>
         </div>
+      </div>
+
+      {/* Data Freshness Indicator */}
+      <div class={`data-freshness ${isStale ? "stale" : "fresh"}`}>
+        <span>Updated {freshnessText.value}</span>
+        {isStale && <span title="Data may be stale">⚠</span>}
       </div>
     </div>
   );

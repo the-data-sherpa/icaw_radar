@@ -223,24 +223,25 @@ export async function getActiveAlerts(
 ): Promise<string[]> {
   const cacheKey = `alerts-${lat}-${lon}`;
   // Simple in-memory cache for alerts (5 minutes)
-  // deno-lint-ignore no-explicit-any
-  const cached = weatherCache.get(cacheKey) as { alerts: string[]; time: number } | any;
+  const cached = weatherCache.get(cacheKey) as
+    | { alerts: string[]; time: number }
+    | undefined;
   const now = Date.now();
-  
+
   if (cached && cached.time && (now - cached.time < 300000)) {
     return cached.alerts;
   }
 
   try {
     const response = await fetchNWS(
-      `${NWS_API_BASE}/alerts/active?point=${lat.toFixed(4)},${lon.toFixed(4)}`
+      `${NWS_API_BASE}/alerts/active?point=${lat.toFixed(4)},${lon.toFixed(4)}`,
     );
     const data = await response.json();
-    
+
     if (data.features && data.features.length > 0) {
       // deno-lint-ignore no-explicit-any
       const alerts = data.features.map((f: any) => f.properties.headline);
-      weatherCache.set(cacheKey, { alerts, time: now }); 
+      weatherCache.set(cacheKey, { alerts, time: now });
       return alerts;
     }
 

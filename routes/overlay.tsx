@@ -6,6 +6,7 @@ import CurrentConditions from "@/islands/CurrentConditions.tsx";
 import Clock from "@/islands/Clock.tsx";
 import AlertBanner from "@/islands/AlertBanner.tsx";
 import AlertOverlay from "@/islands/AlertOverlay.tsx";
+import ThemeController from "@/islands/ThemeController.tsx";
 import { loadConfig } from "@/lib/config-loader.ts";
 
 export default define.page(async function OverlayPage() {
@@ -28,6 +29,10 @@ export default define.page(async function OverlayPage() {
       />
       <AlertBanner />
       <AlertOverlay />
+      <ThemeController
+        latitude={config.location.latitude}
+        longitude={config.location.longitude}
+      />
     </Layout>
   );
 });

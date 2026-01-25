@@ -7,7 +7,7 @@ const content = await Deno.readTextFile(serverEntry);
 // Replace { id: with { filePath: in route definitions
 const patched = content.replace(
   /\{\s*id:\s*("[^"]+"),\s*mod:/g,
-  "{ filePath: $1, mod:"
+  "{ filePath: $1, mod:",
 );
 
 await Deno.writeTextFile(serverEntry, patched);
