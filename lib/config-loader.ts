@@ -43,15 +43,15 @@ export async function loadConfig(): Promise<AppConfig> {
 export function getDefaultConfig(): AppConfig {
   return {
     location: {
-      latitude: 41.5868,
-      longitude: -93.6250,
-      name: "Des Moines",
-      state: "IA",
+      latitude: 35.7846,
+      longitude: -80.8883,
+      name: "Statesville",
+      state: "NC",
     },
     branding: {
       stationId: "ICAW",
-      stationName: "Your Weather Station",
-      logoPath: "/images/logo.svg",
+      stationName: "Iredell County Alert Weather",
+      logoPath: "/images/icaw-logo.png",
     },
     display: {
       temperatureUnit: "F",
