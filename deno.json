@@ -2,9 +2,9 @@
   "nodeModulesDir": "manual",
   "tasks": {
     "check": "deno fmt --check . && deno lint . && deno check",
-    "dev": "vite",
-    "dev:build": "vite build && deno run -A scripts/patch-routes.ts && deno serve -A --watch _fresh/server.js",
-    "build": "vite build && deno run -A scripts/patch-routes.ts",
+    "dev": "deno run -A npm:vite",
+    "dev:build": "deno run -A npm:vite build && deno run -A scripts/patch-routes.ts && deno serve -A --watch _fresh/server.js",
+    "build": "deno run -A npm:vite build && deno run -A scripts/patch-routes.ts",
     "start": "deno serve -A _fresh/server.js",
     "update": "deno run -A -r jsr:@fresh/update ."
   },
