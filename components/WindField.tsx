@@ -65,12 +65,14 @@ function interpolateWind(
 
     // Convert meteorological direction to mathematical angle
     // Meteorological: 0=N, 90=E, 180=S, 270=W (direction FROM which wind blows)
-    // We want direction TO which wind flows, so add 180
-    const mathAngle = ((270 - point.direction + 180) * Math.PI) / 180;
+    // Add 180 to get flow direction (TO), then convert to math angle (90 - meteoAngle)
+    // Math angle = 90 - (direction + 180) = -90 - direction = (270 - direction)
+    const mathAngle = ((270 - point.direction) * Math.PI) / 180;
 
     weightedSpeed += point.speed * weight;
     weightedDirX += Math.cos(mathAngle) * weight;
-    weightedDirY += Math.sin(mathAngle) * weight;
+    // Negate sin because canvas Y-axis points downward
+    weightedDirY += -Math.sin(mathAngle) * weight;
   }
 
   const avgSpeed = weightedSpeed / totalWeight;

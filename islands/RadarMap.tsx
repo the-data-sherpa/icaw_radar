@@ -278,10 +278,13 @@ export default function RadarMap(
     return () => globalThis.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  useEffect(() => {
-    if (!mapContainer.current || frames.value.length === 0) return;
+  // Track how many radar frame layers are currently on the map
+  const radarFrameCount = useRef(0);
 
-    // Get MapLibre GL from global scope (loaded via CDN)
+  // Create map once — does NOT depend on frames
+  useEffect(() => {
+    if (!mapContainer.current) return;
+
     // deno-lint-ignore no-explicit-any
     const maplibregl = (globalThis as any).maplibregl;
     if (!maplibregl) {
@@ -304,14 +307,13 @@ export default function RadarMap(
       }
     } catch { /* ignore error */ }
 
-    // Create map
     let map;
     try {
       map = new maplibregl.Map({
         container: mapContainer.current!,
         style: {
           version: 8,
-          glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf", // Required for text labels
+          glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
           sources: {
             "carto-dark": {
               type: "raster",
@@ -337,7 +339,7 @@ export default function RadarMap(
         center: initialCenter,
         zoom: initialZoom,
         attributionControl: false,
-        interactive: true, // Enable zoom/pan
+        interactive: true,
       });
     } catch (e) {
       console.error("Failed to initialize map:", e);
@@ -360,7 +362,6 @@ export default function RadarMap(
         }),
       );
 
-      // Update mini-map viewport indicator
       const bounds = map.getBounds();
       mapBounds.value = {
         north: bounds.getNorth(),
@@ -380,28 +381,7 @@ export default function RadarMap(
         west: bounds.getWest(),
       };
 
-      // Add radar layers for each frame
-      frames.value.forEach((frame, idx) => {
-        map.addSource(`radar-${idx}`, {
-          type: "raster",
-          tiles: [frame.tileUrl],
-          tileSize: 256,
-        });
-
-        // Start with oldest frame visible (last index)
-        const isOldestFrame = idx === frames.value.length - 1;
-        map.addLayer({
-          id: `radar-layer-${idx}`,
-          type: "raster",
-          source: `radar-${idx}`,
-          paint: {
-            "raster-opacity": isOldestFrame ? 0.7 : 0,
-            "raster-opacity-transition": { duration: 400, delay: 0 }, // Smooth cross-fade
-          },
-        });
-      });
-
-      // Add labels layer on top of radar
+      // Add labels layer on top of radar (will be above radar frames added later)
       map.addSource("carto-labels", {
         type: "raster",
         tiles: [
@@ -448,7 +428,6 @@ export default function RadarMap(
           data: "/iredell-cities.json",
         });
 
-        // City Dots
         map.addLayer({
           id: "iredell-cities-dots",
           type: "circle",
@@ -461,7 +440,6 @@ export default function RadarMap(
           },
         });
 
-        // City Labels
         map.addLayer({
           id: "iredell-cities-labels",
           type: "symbol",
@@ -472,8 +450,8 @@ export default function RadarMap(
             "text-size": 12,
             "text-offset": [0, 1.2],
             "text-anchor": "top",
-            "text-allow-overlap": true, // Force display
-            "text-ignore-placement": true, // Force display even if it collides
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
           },
           paint: {
             "text-color": "#ffffff",
@@ -528,8 +506,6 @@ export default function RadarMap(
       }
 
       // Add 24h Precip Layer (Hidden by default)
-      // Using IEM's Q2 (MRMS) precipitation products
-      // Ref: https://mesonet.agron.iastate.edu/ogc/
       try {
         map.addSource("mrms-precip", {
           type: "raster",
@@ -550,10 +526,7 @@ export default function RadarMap(
         console.error("Failed precip", e);
       }
 
-      // Add Echo Tops Layer (EET - Enhanced Echo Tops, Hidden by default)
-      // Note: IEM does not provide national velocity mosaic, only per-radar
-      // Echo Tops shows storm height which is useful for severe weather spotting
-      // Ref: https://mesonet.agron.iastate.edu/GIS/ridge.phtml
+      // Add Echo Tops Layer (Hidden by default)
       try {
         map.addSource("mrms-velocity", {
           type: "raster",
@@ -584,7 +557,6 @@ export default function RadarMap(
           data: { type: "FeatureCollection", features: [] },
         });
 
-        // Outer glow layer (largest, most transparent)
         map.addLayer({
           id: "lightning-glow-outer",
           type: "circle",
@@ -597,7 +569,6 @@ export default function RadarMap(
           },
         });
 
-        // Middle glow layer
         map.addLayer({
           id: "lightning-glow-middle",
           type: "circle",
@@ -610,7 +581,6 @@ export default function RadarMap(
           },
         });
 
-        // Inner glow layer (brightest)
         map.addLayer({
           id: "lightning-glow-inner",
           type: "circle",
@@ -623,7 +593,6 @@ export default function RadarMap(
           },
         });
 
-        // Core strike point (white center)
         map.addLayer({
           id: "lightning-core",
           type: "circle",
@@ -638,22 +607,7 @@ export default function RadarMap(
         console.error("Failed to add lightning layers:", e);
       }
 
-      // Initialize frame state - show oldest frame first
-      if (frames.value.length > 0) {
-        const oldestFrameIdx = frames.value.length - 1;
-        frameIndex.value = oldestFrameIdx;
-        prevFrameIndex.current = oldestFrameIdx;
-        updateTimestamp(frames.value[oldestFrameIdx].timestamp);
-
-        // Wait for tiles to load before starting animation
-        // This prevents jarring transition on first load
-        setTimeout(() => {
-          animationReady.value = true;
-          isPlaying.value = true;
-        }, 1500); // Give tiles time to render
-      }
-
-      // Mark map as loaded for storm reports component
+      // Mark map as loaded so the frames effect can add radar layers
       mapLoaded.value = true;
     });
 
@@ -662,9 +616,60 @@ export default function RadarMap(
     return () => {
       if (mapInstance.current) {
         mapInstance.current.remove();
+        mapInstance.current = null;
       }
     };
-  }, [latitude, longitude, zoom, frames.value]);
+  }, [latitude, longitude, zoom]);
+
+  // Add/update radar frame layers when frames change — without recreating the map
+  useEffect(() => {
+    const map = mapInstance.current;
+    if (!map || !mapLoaded.value || frames.value.length === 0) return;
+
+    // Remove old radar frame layers and sources
+    for (let i = 0; i < radarFrameCount.current; i++) {
+      if (map.getLayer(`radar-layer-${i}`)) map.removeLayer(`radar-layer-${i}`);
+      if (map.getSource(`radar-${i}`)) map.removeSource(`radar-${i}`);
+    }
+
+    // Add new radar frame layers (insert below labels layer)
+    frames.value.forEach((frame: RadarFrame, idx: number) => {
+      map.addSource(`radar-${idx}`, {
+        type: "raster",
+        tiles: [frame.tileUrl],
+        tileSize: 256,
+      });
+
+      const isOldestFrame = idx === frames.value.length - 1;
+      map.addLayer(
+        {
+          id: `radar-layer-${idx}`,
+          type: "raster",
+          source: `radar-${idx}`,
+          paint: {
+            "raster-opacity": isOldestFrame ? 0.7 : 0,
+            "raster-opacity-transition": { duration: 400, delay: 0 },
+          },
+        },
+        "carto-labels-layer", // Insert below labels
+      );
+    });
+
+    radarFrameCount.current = frames.value.length;
+
+    // Initialize frame state — show oldest frame first
+    const oldestFrameIdx = frames.value.length - 1;
+    frameIndex.value = oldestFrameIdx;
+    prevFrameIndex.current = oldestFrameIdx;
+    updateTimestamp(frames.value[oldestFrameIdx].timestamp);
+
+    if (!animationReady.value) {
+      setTimeout(() => {
+        animationReady.value = true;
+        isPlaying.value = true;
+      }, 1500);
+    }
+  }, [frames.value, mapLoaded.value]);
 
   // Layer visibility - responds IMMEDIATELY to layer changes (separate from animation)
   useEffect(() => {
@@ -747,7 +752,7 @@ export default function RadarMap(
     if (!isPlaying.value || frames.value.length === 0 || !animationReady.value) return;
 
     const map = mapInstance.current;
-    if (!map || !map.loaded()) return;
+    if (!map) return;
 
     const totalFrames = frames.value.length;
     // Start from oldest frame (last in array, highest index = furthest back in time)
