@@ -66,10 +66,14 @@ export function LeafletFallbackMap(
   // Feature toggles (simplified for fallback — no lightning glow, no wind particles)
   const showLightning = useSignal(false);
   const showHourly = useSignal(false);
+  const showAlertPolygons = useSignal(true);
   const windEnabled = useSignal(false);
   const stormReportsEnabled = useSignal(false);
   const showMiniMap = useSignal(false);
   const stormReports = useSignal<StormReport[]>([]);
+
+  // Alert polygon Leaflet layer ref
+  const alertLayer = useRef<LeafletGeoJSON>(null);
 
   // Fetch radar frames
   useEffect(() => {
@@ -105,6 +109,74 @@ export function LeafletFallbackMap(
     const interval = setInterval(fetchStormReports, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch and render alert polygons
+  useEffect(() => {
+    // deno-lint-ignore no-explicit-any
+    const L = (globalThis as any).L;
+    const map = mapRef.current;
+
+    async function fetchAndRender() {
+      if (!L || !map) return;
+      try {
+        const response = await fetch("/api/alerts/geo");
+        const data = await response.json();
+
+        // Remove old layer
+        if (alertLayer.current && map.hasLayer(alertLayer.current)) {
+          map.removeLayer(alertLayer.current);
+        }
+
+        if (!showAlertPolygons.value || !data.features?.length) return;
+
+        alertLayer.current = L.geoJSON(data, {
+          style: (feature: { properties: { color: string; isWatch: boolean } }) => ({
+            color: feature.properties.color,
+            weight: 2.5,
+            opacity: 1,
+            fillColor: feature.properties.color,
+            fillOpacity: feature.properties.isWatch ? 0.08 : 0.15,
+            dashArray: feature.properties.isWatch ? "8, 6" : undefined,
+          }),
+          onEachFeature: (
+            feature: { properties: { event: string; headline: string; color: string; areaDesc: string; expires: string } },
+            layer: { bindPopup: (html: string, opts?: Record<string, unknown>) => void },
+          ) => {
+            const p = feature.properties;
+            const expiryStr = p.expires
+              ? new Date(p.expires).toLocaleString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  hour12: true,
+                })
+              : "";
+            layer.bindPopup(
+              `<div class="alert-popup-leaflet">
+                <div style="color:${p.color};font-weight:700;font-size:14px;margin-bottom:4px">${p.event}</div>
+                <div style="font-size:12px;margin-bottom:4px">${p.headline}</div>
+                ${p.areaDesc ? `<div style="font-size:11px;opacity:0.8;margin-bottom:4px">${p.areaDesc}</div>` : ""}
+                ${expiryStr ? `<div style="font-size:11px;opacity:0.7">Expires: ${expiryStr}</div>` : ""}
+              </div>`,
+              { maxWidth: 300 },
+            );
+          },
+        }).addTo(map);
+      } catch (e) {
+        console.error("Failed to fetch alert polygons:", e);
+      }
+    }
+
+    fetchAndRender();
+    const interval = setInterval(fetchAndRender, 30_000);
+    return () => {
+      clearInterval(interval);
+      if (alertLayer.current && map?.hasLayer(alertLayer.current)) {
+        map.removeLayer(alertLayer.current);
+      }
+    };
+  }, [showAlertPolygons.value]);
 
   // Initialize Leaflet map
   useEffect(() => {
@@ -434,6 +506,10 @@ export function LeafletFallbackMap(
             activeLayer.value = "velocity";
           } else activeLayer.value = "radar";
           break;
+        case "a":
+        case "A":
+          showAlertPolygons.value = !showAlertPolygons.value;
+          break;
       }
     }
 
@@ -573,6 +649,7 @@ export function LeafletFallbackMap(
       {activeLayer.value === "velocity" ? <VelocityLegend /> : <RadarLegend />}
 
       <FeatureToggles
+        showAlertPolygons={showAlertPolygons}
         showLightning={showLightning}
         showStormReports={stormReportsEnabled}
         showWind={windEnabled}

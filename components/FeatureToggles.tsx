@@ -1,6 +1,7 @@
 import { type Signal, useSignal } from "@preact/signals";
 
 interface FeatureTogglesProps {
+  showAlertPolygons: Signal<boolean>;
   showLightning: Signal<boolean>;
   showStormReports: Signal<boolean>;
   showWind: Signal<boolean>;
@@ -12,6 +13,11 @@ export function FeatureToggles(props: FeatureTogglesProps) {
   const expanded = useSignal(false);
 
   const features = [
+    {
+      signal: props.showAlertPolygons,
+      icon: String.fromCodePoint(0x26A0, 0xFE0F),
+      label: "Alert Zones",
+    },
     {
       signal: props.showLightning,
       icon: String.fromCodePoint(0x26A1),

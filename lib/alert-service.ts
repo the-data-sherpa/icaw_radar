@@ -19,8 +19,8 @@ export interface WeatherAlert {
   isEmergency: boolean;
 }
 
-// Alert severity colors for display
-const ALERT_COLORS: Record<string, string> = {
+/** Alert severity colors for display. */
+export const ALERT_COLORS: Record<string, string> = {
   // Tornado
   "Tornado Warning": "#FF0000",
   "Tornado Watch": "#FFFF00",
@@ -58,7 +58,16 @@ const ALERT_COLORS: Record<string, string> = {
   default: "#808080",
 };
 
-// Events that trigger full-screen overlay
+/** Events classified as watches (dashed outline, lighter fill). */
+export const WATCH_EVENTS = [
+  "Tornado Watch",
+  "Severe Thunderstorm Watch",
+  "Flash Flood Watch",
+  "Flood Watch",
+  "Winter Storm Watch",
+];
+
+/** Events that trigger full-screen overlay. */
 const EMERGENCY_EVENTS = [
   "Tornado Warning",
   "Tornado Emergency",
@@ -67,11 +76,11 @@ const EMERGENCY_EVENTS = [
   "Particularly Dangerous Situation",
 ];
 
-function getAlertColor(event: string): string {
+export function getAlertColor(event: string): string {
   return ALERT_COLORS[event] || ALERT_COLORS.default;
 }
 
-function isEmergencyAlert(event: string, headline: string): boolean {
+export function isEmergencyAlert(event: string, headline: string): boolean {
   if (EMERGENCY_EVENTS.some((e) => event.includes(e))) {
     return true;
   }

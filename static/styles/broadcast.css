@@ -433,6 +433,41 @@ body {
   color: var(--text-secondary);
 }
 
+.alert-overlay-dismiss {
+  margin-top: 32px;
+  font-size: 16px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.alert-overlay-close {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  transition: background 0.2s;
+}
+
+.alert-overlay-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.alert-overlay {
+  cursor: pointer;
+}
+
 @keyframes pulse-bg {
   0%,
   100% {
@@ -1681,6 +1716,98 @@ body {
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   line-height: 1.4;
+}
+
+/* ===== Alert Polygon Popup ===== */
+.alert-popup {
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 32px 12px 12px;
+  min-width: 200px;
+  max-width: 320px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+  font-family: var(--font-body);
+}
+
+.alert-popup .popup-arrow {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: rgba(20, 20, 20, 0.95);
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.alert-popup .popup-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.alert-popup .popup-close:hover {
+  color: #fff;
+}
+
+.alert-popup-event {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.alert-popup-headline {
+  font-size: 12px;
+  color: #ddd;
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.alert-popup-area {
+  font-size: 11px;
+  color: #aaa;
+  margin-bottom: 4px;
+}
+
+.alert-popup-expires {
+  font-size: 11px;
+  color: #999;
+}
+
+/* Alert polygon hover tooltip */
+.alert-tooltip {
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alert-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 /* Recent report pulsing animation */

@@ -10,6 +10,7 @@ import { WindField } from "@/components/WindField.tsx";
 import { AudioToggle } from "@/components/AudioToggle.tsx";
 import { audioAlerts } from "@/lib/audio-alerts.ts";
 import { type StormReport, StormReports } from "@/components/StormReports.tsx";
+import { AlertPolygons } from "@/components/AlertPolygons.tsx";
 import { FeatureToggles } from "@/components/FeatureToggles.tsx";
 import {
   generateLightningGeoJSON,
@@ -123,6 +124,7 @@ function MapLibreRadarMap(
   // Feature toggle signals for FeatureToggles panel
   const showLightning = useSignal(false);
   const showHourly = useSignal(false);
+  const showAlertPolygons = useSignal(true);
   const lightningStrikes = useSignal<LightningStrike[]>([]);
 
   useEffect(() => {
@@ -310,6 +312,11 @@ function MapLibreRadarMap(
         case "S":
           // Toggle storm reports overlay
           stormReportsEnabled.value = !stormReportsEnabled.value;
+          break;
+        case "a":
+        case "A":
+          // Toggle alert polygon overlay
+          showAlertPolygons.value = !showAlertPolygons.value;
           break;
       }
     }
@@ -1119,6 +1126,14 @@ function MapLibreRadarMap(
 
       {activeLayer.value === "velocity" ? <VelocityLegend /> : <RadarLegend />}
 
+      {/* Alert Polygon Overlay */}
+      {mapLoaded.value && mapInstance.current && (
+        <AlertPolygons
+          map={mapInstance.current}
+          visible={showAlertPolygons.value}
+        />
+      )}
+
       {/* Storm Reports Overlay */}
       {mapLoaded.value && mapInstance.current && (
         <StormReports
@@ -1134,6 +1149,7 @@ function MapLibreRadarMap(
 
       {/* Feature Toggles Panel */}
       <FeatureToggles
+        showAlertPolygons={showAlertPolygons}
         showLightning={showLightning}
         showStormReports={stormReportsEnabled}
         showWind={windEnabled}

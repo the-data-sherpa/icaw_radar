@@ -53,13 +53,14 @@ export default function AlertOverlay() {
             }, 3000);
           }
 
-          // Auto-dismiss after 60 seconds
+          // Auto-dismiss after 15 seconds
           setTimeout(() => {
-            dismissed.value = new Set([...dismissed.value, emergency.id]);
-            visible.value = false;
-            // Clear the played status when dismissed so it can play again if it recurs
-            audioAlerts.clearPlayed(emergency.id);
-          }, 60000);
+            if (visible.value && emergencyAlert.value?.id === emergency.id) {
+              dismissed.value = new Set([...dismissed.value, emergency.id]);
+              visible.value = false;
+              audioAlerts.clearPlayed(emergency.id);
+            }
+          }, 15000);
         }
       } catch (e) {
         console.error("Emergency alert fetch error:", e);
@@ -87,11 +88,19 @@ export default function AlertOverlay() {
     icon = "FL";
   }
 
+  /** Dismiss the current alert overlay. */
+  function handleDismiss() {
+    dismissed.value = new Set([...dismissed.value, alert.id]);
+    visible.value = false;
+    audioAlerts.clearPlayed(alert.id);
+  }
+
   return (
     <div
       class={`alert-overlay ${audioActive.value ? "audio-active" : ""}`}
       // @ts-ignore - CSS custom property
       style={{ "--alert-color": alert.color }}
+      onClick={handleDismiss}
     >
       <div class="alert-overlay-content">
         <div class="alert-overlay-icon" style={{ color: alert.color }}>
@@ -102,7 +111,16 @@ export default function AlertOverlay() {
         </div>
         <div class="alert-overlay-headline">{alert.headline}</div>
         <div class="alert-overlay-area">{alert.areaDesc}</div>
+        <div class="alert-overlay-dismiss">Click anywhere to dismiss</div>
       </div>
+      <button
+        type="button"
+        class="alert-overlay-close"
+        onClick={handleDismiss}
+        aria-label="Dismiss alert"
+      >
+        X
+      </button>
     </div>
   );
 }
