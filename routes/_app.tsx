@@ -29,6 +29,12 @@ export default define.page(function App({ Component }) {
         />
         <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js">
         </script>
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+        </script>
         <link rel="stylesheet" href="/styles/broadcast.css" />
       </head>
       <body>

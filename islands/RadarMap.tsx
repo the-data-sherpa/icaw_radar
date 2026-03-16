@@ -17,6 +17,8 @@ import {
   LightningOverlay,
 } from "@/components/LightningOverlay.tsx";
 import HourlyForecast from "@/islands/HourlyForecast.tsx";
+import { isWebGLSupported } from "@/lib/webgl-detect.ts";
+import { LeafletFallbackMap } from "@/components/LeafletFallbackMap.tsx";
 
 // ============================================================================
 // Interfaces
@@ -53,7 +55,45 @@ interface WindPoint {
 // deno-lint-ignore no-explicit-any
 type MapLibreMap = any;
 
+// Cache WebGL detection at module level (runs once on client)
+let _webglSupported: boolean | null = null;
+function checkWebGL(): boolean {
+  if (_webglSupported === null) {
+    _webglSupported = typeof document !== "undefined"
+      ? isWebGLSupported()
+      : true;
+  }
+  return _webglSupported;
+}
+
+/**
+ * Top-level RadarMap component that selects the rendering backend.
+ * Uses MapLibre GL (WebGL) when available, falls back to Leaflet (DOM/SVG).
+ */
 export default function RadarMap(
+  { latitude, longitude, zoom = 7 }: RadarMapProps,
+) {
+  if (!checkWebGL()) {
+    return (
+      <LeafletFallbackMap
+        latitude={latitude}
+        longitude={longitude}
+        zoom={zoom}
+      />
+    );
+  }
+
+  return (
+    <MapLibreRadarMap
+      latitude={latitude}
+      longitude={longitude}
+      zoom={zoom}
+    />
+  );
+}
+
+/** WebGL-based radar map using MapLibre GL JS. */
+function MapLibreRadarMap(
   { latitude, longitude, zoom = 7 }: RadarMapProps,
 ) {
   const mapContainer = useRef<HTMLDivElement>(null);
