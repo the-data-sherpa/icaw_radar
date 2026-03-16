@@ -4,6 +4,39 @@ import { getAlertColor, isEmergencyAlert, WATCH_EVENTS } from "./alert-service.t
 const NWS_API_BASE = "https://api.weather.gov";
 const USER_AGENT = "ICAW-Radar/1.0 (weather@example.com)";
 
+/** Geometry types that MapLibre fill/line layers can render. */
+const SUPPORTED_GEOMETRY_TYPES = new Set(["Polygon", "MultiPolygon"]);
+
+/**
+ * Normalizes a GeoJSON geometry to a Polygon or MultiPolygon.
+ * Extracts polygon members from GeometryCollections; returns null for unsupported types.
+ */
+// deno-lint-ignore no-explicit-any
+function normalizeGeometry(geometry: any): any | null {
+  if (!geometry) return null;
+
+  if (SUPPORTED_GEOMETRY_TYPES.has(geometry.type)) {
+    return geometry;
+  }
+
+  if (geometry.type === "GeometryCollection" && Array.isArray(geometry.geometries)) {
+    const polygons = geometry.geometries.filter(
+      // deno-lint-ignore no-explicit-any
+      (g: any) => SUPPORTED_GEOMETRY_TYPES.has(g.type),
+    );
+    if (polygons.length === 0) return null;
+    if (polygons.length === 1) return polygons[0];
+    // Merge into a single MultiPolygon
+    const coordinates = polygons.flatMap(
+      // deno-lint-ignore no-explicit-any
+      (g: any) => g.type === "Polygon" ? [g.coordinates] : g.coordinates,
+    );
+    return { type: "MultiPolygon", coordinates };
+  }
+
+  return null;
+}
+
 /** GeoJSON Feature properties for alert polygons. */
 export interface AlertGeoProperties {
   event: string;
@@ -53,19 +86,20 @@ export async function getAlertGeoJSON(
 
     const data = await response.json();
 
-    // Filter to features with actual polygon geometry, map to slim properties
+    // Filter to features with renderable polygon geometry, map to slim properties
     const features = (data.features || [])
       // deno-lint-ignore no-explicit-any
-      .filter((f: any) => f.geometry !== null)
-      // deno-lint-ignore no-explicit-any
-      .map((feature: any) => {
+      .reduce((acc: any[], feature: any) => {
+        const geometry = normalizeGeometry(feature.geometry);
+        if (!geometry) return acc;
+
         const props = feature.properties;
         const event: string = props.event || "Unknown";
         const headline: string = props.headline || event;
 
-        return {
+        acc.push({
           type: "Feature" as const,
-          geometry: feature.geometry,
+          geometry,
           properties: {
             event,
             headline,
@@ -76,8 +110,9 @@ export async function getAlertGeoJSON(
             expires: props.expires || "",
             areaDesc: props.areaDesc || "",
           } satisfies AlertGeoProperties,
-        };
-      });
+        });
+        return acc;
+      }, []);
 
     const collection: FeatureCollection = {
       type: "FeatureCollection",
