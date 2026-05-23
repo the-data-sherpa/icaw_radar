@@ -22,7 +22,7 @@ export default function StreamOverlay({ className }: StreamOverlayProps) {
         if (weatherRes.ok) {
           const weather = await weatherRes.json();
           items.push(
-            `CURRENTLY: ${weather.temperature}${weather.temperatureUnit} ${weather.conditions.toUpperCase()}  ///  WIND: ${weather.windDirection} ${weather.windSpeed} MPH`,
+            `CURRENTLY: ${weather.temperature}${weather.temperatureUnit} ${weather.conditions.toUpperCase()}  ///  WIND: FROM ${weather.windDirection} ${weather.windSpeed} MPH`,
           );
           // Add additional spacing or items
           if (weather.feelsLike && weather.feelsLike !== weather.temperature) {

@@ -418,7 +418,7 @@ function MapLibreRadarMap(
       };
     });
 
-    map.on("load", () => {
+    map.on("load", async () => {
       // Set initial bounds for mini-map
       const bounds = map.getBounds();
       mapBounds.value = {
@@ -468,11 +468,14 @@ function MapLibreRadarMap(
         console.error("Failed to add boundary layer:", e);
       }
 
-      // Add Iredell Cities
+      // Add Iredell Cities — fetch and inline to avoid worker-XHR edge cases
       try {
+        const citiesData = await fetch("/iredell-cities.json").then((r) =>
+          r.json()
+        );
         map.addSource("iredell-cities", {
           type: "geojson",
-          data: "/iredell-cities.json",
+          data: citiesData,
         });
 
         map.addLayer({
@@ -493,7 +496,7 @@ function MapLibreRadarMap(
           source: "iredell-cities",
           layout: {
             "text-field": ["get", "name"],
-            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-font": ["Open Sans Bold"],
             "text-size": 12,
             "text-offset": [0, 1.2],
             "text-anchor": "top",

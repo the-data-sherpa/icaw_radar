@@ -139,7 +139,9 @@ export default function CurrentConditions() {
         <div class="weather-detail">
           <span class="label">Wind</span>
           <span class="value">
-            {c.windSpeed !== null ? `${c.windDirection} ${c.windSpeed}` : "--"}
+            {c.windSpeed !== null
+              ? `from ${c.windDirection} ${c.windSpeed}`
+              : "--"}
             {" "}
             mph
             {c.windGust !== null && ` G${c.windGust}`}
