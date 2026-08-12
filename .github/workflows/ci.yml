@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same ref makes the in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          # Pinned, not v2.x: `deno fmt` output can shift between releases, so a
+          # floating version would fail `deno fmt --check` on untouched files.
+          # Bump this together with the local toolchain.
+          deno-version: "2.9.3"
+          cache: true
+
+      - name: Install dependencies
+        run: deno install
+
+      # fmt --check, lint, type check, and scripts/check-deck-scope.ts, which
+      # fails if broadcast.css gains an @media block or a deck.css selector stops
+      # being scoped to html.web.
+      - name: Check
+        run: deno task check
+
+      # Same command Netlify runs, so a red build here means a red deploy there.
+      - name: Build
+        run: deno task build
+
+      # The site and the OBS overlay share one shell and one stylesheet. These
+      # assertions are the runtime half of the guarantee that check-deck-scope.ts
+      # enforces statically: /overlay must stay a 1920x1080 canvas that never
+      # loads the responsive layer.
+      - name: Smoke test both routes
+        run: |
+          set -euo pipefail
+
+          deno task start &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:8000/; then break; fi
+            sleep 1
+          done
+
+          site=$(curl -sf --retry 3 http://localhost:8000/)
+          overlay=$(curl -sf --retry 3 http://localhost:8000/overlay)
+
+          fail=0
+          assert() { # <haystack> <needle> <description>
+            if printf '%s' "$1" | grep -qF -- "$2"; then
+              echo "ok: $3"
+            else
+              echo "FAIL: $3 (missing: $2)"
+              fail=1
+            fi
+          }
+          refute() {
+            if printf '%s' "$1" | grep -qF -- "$2"; then
+              echo "FAIL: $3 (unexpectedly present: $2)"
+              fail=1
+            else
+              echo "ok: $3"
+            fi
+          }
+
+          assert "$site" 'class="web"' '/ marks itself as the responsive site'
+          assert "$site" 'width=device-width' '/ uses a device-width viewport'
+          assert "$site" '/styles/deck.css' '/ loads the responsive layer'
+
+          assert "$overlay" 'class="obs"' '/overlay marks itself as the OBS canvas'
+          assert "$overlay" 'width=1920' '/overlay stays pinned to 1920 wide'
+          refute "$overlay" '/styles/deck.css' '/overlay never loads the responsive layer'
+
+          exit "$fail"
