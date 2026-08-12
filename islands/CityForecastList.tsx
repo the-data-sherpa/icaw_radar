@@ -175,29 +175,39 @@ export default function CityForecastList() {
       <h3 class="city-list-header">Iredell Outlook</h3>
       <div class="city-list-items">
         {forecasts.value.map((city) => (
-          <div
+          <button
             key={city.name}
-            class={`city-item ${selectedCity.value?.name === city.name ? "selected" : ""}`}
+            type="button"
+            class={`city-item ${
+              selectedCity.value?.name === city.name ? "selected" : ""
+            }`}
+            aria-expanded={selectedCity.value?.name === city.name}
+            aria-controls="city-hourly-panel"
             onClick={() => handleCityClick(city)}
           >
-            <div class="city-name">{city.name}</div>
-            <div class="city-temp">
+            <span class="city-name">{city.name}</span>
+            <span class="city-temp">
               {city.temp}
               {city.unit}
-            </div>
+            </span>
             {city.icon && (
               <img src={city.icon} alt={city.conditions} class="city-icon" />
             )}
-          </div>
+          </button>
         ))}
       </div>
 
       {/* Slide-out Hourly Panel */}
-      <div class={`city-hourly-panel ${selectedCity.value ? "open" : ""}`}>
+      <div
+        id="city-hourly-panel"
+        class={`city-hourly-panel ${selectedCity.value ? "open" : ""}`}
+      >
         {selectedCity.value && (
           <>
             <div class="city-hourly-header">
-              <span class="city-hourly-title">{selectedCity.value.name} Hourly</span>
+              <span class="city-hourly-title">
+                {selectedCity.value.name} Hourly
+              </span>
               <button
                 type="button"
                 class="city-hourly-close"
@@ -208,49 +218,60 @@ export default function CityForecastList() {
               </button>
             </div>
 
-            {hourlyLoading.value ? (
-              <div class="city-hourly-loading">Loading...</div>
-            ) : (
-              <div class="city-hourly-scroll" ref={scrollRef}>
-                {hourlyData.value.map((h, i) => {
-                  // Detect day transition (12 AM = midnight = new day)
-                  const showDaySeparator = i > 0 && h.hour === "12 AM";
-                  const today = new Date();
-                  const tomorrow = new Date(today);
-                  tomorrow.setDate(tomorrow.getDate() + 1);
-                  const dayLabel = tomorrow.toLocaleDateString("en-US", {
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                  });
+            {hourlyLoading.value
+              ? <div class="city-hourly-loading">Loading...</div>
+              : (
+                <div class="city-hourly-scroll" ref={scrollRef}>
+                  {hourlyData.value.map((h, i) => {
+                    // Detect day transition (12 AM = midnight = new day)
+                    const showDaySeparator = i > 0 && h.hour === "12 AM";
+                    const today = new Date();
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    const dayLabel = tomorrow.toLocaleDateString("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    });
 
-                  return (
-                    <>
-                      {showDaySeparator && (
-                        <div class="city-hourly-day-separator tomorrow">
-                          Tomorrow — {dayLabel}
-                        </div>
-                      )}
-                      <div
-                        key={i}
-                        class={`city-hourly-item ${h.isNow ? "now" : ""}`}
-                        title={h.conditions}
-                      >
-                        <span class="city-hourly-time">{h.isNow ? "Now" : h.hour}</span>
-                        <span class="city-hourly-icon">{getIconEmoji(h.icon)}</span>
-                        <span class="city-hourly-temp">{h.temp}&deg;</span>
-                        {h.precipChance > 0 && (
-                          <span class="city-hourly-precip">
-                            <span class="drop">💧</span>
-                            {h.precipChance}%
-                          </span>
+                    return (
+                      <>
+                        {showDaySeparator && (
+                          <div class="city-hourly-day-separator tomorrow">
+                            Tomorrow — {dayLabel}
+                          </div>
                         )}
-                      </div>
-                    </>
-                  );
-                })}
-              </div>
-            )}
+                        <div
+                          key={i}
+                          class={`city-hourly-item ${h.isNow ? "now" : ""}`}
+                        >
+                          <span class="city-hourly-time">
+                            {h.isNow ? "Now" : h.hour}
+                          </span>
+                          <span class="city-hourly-icon">
+                            {getIconEmoji(h.icon)}
+                          </span>
+                          <span class="city-hourly-temp">{h.temp}&deg;</span>
+                          {h.precipChance > 0 && (
+                            <span class="city-hourly-precip">
+                              <span class="drop">💧</span>
+                              {h.precipChance}%
+                            </span>
+                          )}
+                          {
+                            /* Conditions text was title-only, i.e. unreachable
+                            on touch. The emoji is not an equivalent: ICON_MAP
+                            collapses drizzle/rain/showers onto one glyph. */
+                          }
+                          <span class="city-hourly-conditions">
+                            {h.conditions}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })}
+                </div>
+              )}
           </>
         )}
       </div>

@@ -1,7 +1,5 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { RadarLegend } from "@/components/RadarLegend.tsx";
-import { VelocityLegend } from "@/components/VelocityLegend.tsx";
 import { LayerControl } from "@/components/LayerControl.tsx";
 import { AnimationControls } from "@/components/AnimationControls.tsx";
 import { ZoomControls } from "@/components/ZoomControls.tsx";
@@ -9,6 +7,10 @@ import { AudioToggle } from "@/components/AudioToggle.tsx";
 import { audioAlerts } from "@/lib/audio-alerts.ts";
 import { type StormReport } from "@/components/StormReports.tsx";
 import { FeatureToggles } from "@/components/FeatureToggles.tsx";
+import { MapToolsSheet } from "@/components/MapToolsSheet.tsx";
+import { LegendSheet } from "@/components/LegendSheet.tsx";
+import { WindField } from "@/components/WindField.tsx";
+import { LightningOverlay } from "@/components/LightningOverlay.tsx";
 import HourlyForecast from "@/islands/HourlyForecast.tsx";
 
 // ============================================================================
@@ -27,6 +29,43 @@ interface LeafletFallbackMapProps {
   latitude: number;
   longitude: number;
   zoom?: number;
+}
+
+interface WindPoint {
+  lat: number;
+  lon: number;
+  speed: number;
+  direction: number;
+}
+
+interface LightningStrike {
+  lat: number;
+  lon: number;
+  time: number;
+  intensity: number;
+}
+
+/** Mirrors islands/RadarMap.tsx — the saved view is bucketed by viewport width. */
+function getViewKey(): string {
+  return `radar-map-view:${
+    (globalThis.innerWidth ?? 1920) < 1024 ? "sm" : "lg"
+  }`;
+}
+
+const REPORT_COLORS: Record<string, string> = {
+  tornado: "#ff0000",
+  hail: "#00aaff",
+  wind: "#ff8800",
+  flood: "#00ff88",
+  other: "#ffff00",
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // deno-lint-ignore no-explicit-any
@@ -71,9 +110,21 @@ export function LeafletFallbackMap(
   const stormReportsEnabled = useSignal(false);
   const showMiniMap = useSignal(false);
   const stormReports = useSignal<StormReport[]>([]);
+  const toolsOpen = useSignal(false);
+  const windData = useSignal<WindPoint[]>([]);
+  const lightningStrikes = useSignal<LightningStrike[]>([]);
+  const mapBounds = useSignal<
+    { north: number; south: number; east: number; west: number } | null
+  >(null);
 
   // Alert polygon Leaflet layer ref
   const alertLayer = useRef<LeafletGeoJSON>(null);
+  const lightningGroup = useRef<LeafletGeoJSON>(null);
+  const stormGroup = useRef<LeafletGeoJSON>(null);
+
+  const reduceMotion =
+    globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ??
+      false;
 
   // Fetch radar frames
   useEffect(() => {
@@ -130,7 +181,9 @@ export function LeafletFallbackMap(
         if (!showAlertPolygons.value || !data.features?.length) return;
 
         alertLayer.current = L.geoJSON(data, {
-          style: (feature: { properties: { color: string; isWatch: boolean } }) => ({
+          style: (
+            feature: { properties: { color: string; isWatch: boolean } },
+          ) => ({
             color: feature.properties.color,
             weight: 2.5,
             opacity: 1,
@@ -139,25 +192,54 @@ export function LeafletFallbackMap(
             dashArray: feature.properties.isWatch ? "8, 6" : undefined,
           }),
           onEachFeature: (
-            feature: { properties: { event: string; headline: string; color: string; areaDesc: string; expires: string } },
-            layer: { bindPopup: (html: string, opts?: Record<string, unknown>) => void },
+            feature: {
+              properties: {
+                event: string;
+                headline: string;
+                color: string;
+                areaDesc: string;
+                expires: string;
+              };
+            },
+            layer: {
+              bindPopup: (html: string, opts?: Record<string, unknown>) => void;
+            },
           ) => {
             const p = feature.properties;
             const expiryStr = p.expires
               ? new Date(p.expires).toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: true,
-                })
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              })
               : "";
+            // Escaped: this is third-party (NWS) text going into innerHTML.
             layer.bindPopup(
               `<div class="alert-popup-leaflet">
-                <div style="color:${p.color};font-weight:700;font-size:14px;margin-bottom:4px">${p.event}</div>
-                <div style="font-size:12px;margin-bottom:4px">${p.headline}</div>
-                ${p.areaDesc ? `<div style="font-size:11px;opacity:0.8;margin-bottom:4px">${p.areaDesc}</div>` : ""}
-                ${expiryStr ? `<div style="font-size:11px;opacity:0.7">Expires: ${expiryStr}</div>` : ""}
+                <div style="color:${
+                escapeHtml(p.color)
+              };font-weight:700;font-size:14px;margin-bottom:4px">${
+                escapeHtml(p.event)
+              }</div>
+                <div style="font-size:12px;margin-bottom:4px">${
+                escapeHtml(p.headline)
+              }</div>
+                ${
+                p.areaDesc
+                  ? `<div style="font-size:11px;opacity:0.8;margin-bottom:4px">${
+                    escapeHtml(p.areaDesc)
+                  }</div>`
+                  : ""
+              }
+                ${
+                expiryStr
+                  ? `<div style="font-size:11px;opacity:0.7">Expires: ${
+                    escapeHtml(expiryStr)
+                  }</div>`
+                  : ""
+              }
               </div>`,
               { maxWidth: 300 },
             );
@@ -178,6 +260,164 @@ export function LeafletFallbackMap(
     };
   }, [showAlertPolygons.value]);
 
+  // Wind data. The particle canvas is backend-agnostic — it only needs the
+  // current lat/lon bounds — so the wind field is NOT a WebGL-only feature.
+  useEffect(() => {
+    async function fetchWindData() {
+      try {
+        const response = await fetch(
+          `/api/wind?lat=${latitude}&lon=${longitude}`,
+        );
+        const data = await response.json();
+        if (data.points) windData.value = data.points;
+      } catch (e) {
+        console.error("Failed to fetch wind data:", e);
+      }
+    }
+    if (windEnabled.value) fetchWindData();
+    const interval = setInterval(() => {
+      if (windEnabled.value) fetchWindData();
+    }, 600000);
+    return () => clearInterval(interval);
+  }, [latitude, longitude, windEnabled.value]);
+
+  // Lightning strikes, drawn as plain vector circles (no WebGL glow).
+  useEffect(() => {
+    async function fetchLightning() {
+      try {
+        const response = await fetch(
+          `/api/lightning?lat=${latitude}&lon=${longitude}`,
+        );
+        const data = await response.json();
+        lightningStrikes.value = data.strikes || [];
+      } catch {
+        lightningStrikes.value = [];
+      }
+    }
+    if (showLightning.value) fetchLightning();
+    const interval = setInterval(() => {
+      if (showLightning.value) fetchLightning();
+    }, 120000);
+    return () => clearInterval(interval);
+  }, [latitude, longitude, showLightning.value]);
+
+  useEffect(() => {
+    // deno-lint-ignore no-explicit-any
+    const L = (globalThis as any).L;
+    const map = mapRef.current;
+    if (!L || !map) return;
+
+    if (lightningGroup.current && map.hasLayer(lightningGroup.current)) {
+      map.removeLayer(lightningGroup.current);
+    }
+    if (!showLightning.value || lightningStrikes.value.length === 0) return;
+
+    const now = Date.now();
+    lightningGroup.current = L.layerGroup(
+      lightningStrikes.value.map((strike: LightningStrike) => {
+        const opacity = Math.max(0.15, 1 - (now - strike.time) / (180 * 1000));
+        return L.circleMarker([strike.lat, strike.lon], {
+          radius: 4 + strike.intensity,
+          color: "#ffffff",
+          weight: 1,
+          fillColor: "#ffff00",
+          fillOpacity: opacity,
+          opacity,
+          interactive: false,
+        });
+      }),
+    ).addTo(map);
+
+    return () => {
+      if (lightningGroup.current && map.hasLayer(lightningGroup.current)) {
+        map.removeLayer(lightningGroup.current);
+      }
+    };
+  }, [showLightning.value, lightningStrikes.value]);
+
+  // Storm reports. Each report gets a visible dot plus an oversized invisible
+  // hit circle, so the tap target is ~44px instead of ~16px.
+  useEffect(() => {
+    // deno-lint-ignore no-explicit-any
+    const L = (globalThis as any).L;
+    const map = mapRef.current;
+    if (!L || !map) return;
+
+    if (stormGroup.current && map.hasLayer(stormGroup.current)) {
+      map.removeLayer(stormGroup.current);
+    }
+    if (!stormReportsEnabled.value || stormReports.value.length === 0) return;
+
+    // deno-lint-ignore no-explicit-any
+    const markers: any[] = [];
+    for (const report of stormReports.value) {
+      const color = REPORT_COLORS[report.type] ?? REPORT_COLORS.other;
+      markers.push(
+        L.circleMarker([report.lat, report.lon], {
+          radius: 8,
+          color: "#ffffff",
+          weight: 2,
+          fillColor: color,
+          fillOpacity: 0.9,
+          interactive: false,
+        }),
+      );
+      const when = new Date(report.time).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const place = [report.city, report.county && `${report.county} County`]
+        .filter(Boolean).join(", ");
+      markers.push(
+        L.circleMarker([report.lat, report.lon], {
+          radius: 22,
+          opacity: 0,
+          fillOpacity: 0,
+          interactive: true,
+        }).bindPopup(
+          `<div class="storm-report-popup-leaflet">
+            <div style="color:${color};font-weight:700;font-size:14px">${
+            escapeHtml(report.type)
+          }</div>
+            <div style="font-size:12px">${escapeHtml(when)}</div>
+            ${
+            report.magnitude
+              ? `<div style="font-size:12px">${
+                escapeHtml(report.magnitude)
+              }</div>`
+              : ""
+          }
+            ${
+            place
+              ? `<div style="font-size:11px;opacity:0.8">${
+                escapeHtml(place)
+              }</div>`
+              : ""
+          }
+            ${
+            report.remarks
+              ? `<div style="font-size:11px;opacity:0.8">${
+                escapeHtml(report.remarks)
+              }</div>`
+              : ""
+          }
+          </div>`,
+          { maxWidth: 280 },
+        ),
+      );
+    }
+    stormGroup.current = L.layerGroup(markers).addTo(map);
+
+    return () => {
+      if (stormGroup.current && map.hasLayer(stormGroup.current)) {
+        map.removeLayer(stormGroup.current);
+      }
+    };
+  }, [stormReportsEnabled.value, stormReports.value]);
+
   // Initialize Leaflet map
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -193,7 +433,7 @@ export function LeafletFallbackMap(
     let initialZoom = zoom;
     let initialCenter: [number, number] = [latitude, longitude];
     try {
-      const saved = localStorage.getItem("radar-map-view");
+      const saved = localStorage.getItem(getViewKey());
       if (saved) {
         const { lng, lat, zoom: savedZoom } = JSON.parse(saved);
         if (lng && lat && savedZoom) {
@@ -203,6 +443,12 @@ export function LeafletFallbackMap(
       }
     } catch { /* ignore */ }
 
+    // GESTURE POLICY: no cooperative-gesture equivalent is configured, and
+    // none is wanted. The document does not scroll below 64rem, so one-finger
+    // pan cannot steal a page scroll. Leaflet has no rotation or pitch at all,
+    // so the MapLibre dragRotate/touchPitch lockdown has no counterpart here.
+    // `tap` handling is left at Leaflet's default: it is what makes popups
+    // openable on iOS.
     const map = L.map(mapContainer.current, {
       center: initialCenter,
       zoom: initialZoom,
@@ -254,7 +500,10 @@ export function LeafletFallbackMap(
       .then((r) => r.json())
       .then((data) => {
         citiesLayer.current = L.geoJSON(data, {
-          pointToLayer: (_feature: { properties: { name: string } }, latlng: { lat: number; lng: number }) => {
+          pointToLayer: (
+            _feature: { properties: { name: string } },
+            latlng: { lat: number; lng: number },
+          ) => {
             return L.circleMarker(latlng, {
               radius: 3,
               fillColor: "#ffffff",
@@ -263,7 +512,15 @@ export function LeafletFallbackMap(
               fillOpacity: 1,
             });
           },
-          onEachFeature: (feature: { properties: { name: string } }, layer: { bindTooltip: (name: string, opts: Record<string, unknown>) => void }) => {
+          onEachFeature: (
+            feature: { properties: { name: string } },
+            layer: {
+              bindTooltip: (
+                name: string,
+                opts: Record<string, unknown>,
+              ) => void;
+            },
+          ) => {
             if (feature.properties?.name) {
               layer.bindTooltip(feature.properties.name, {
                 permanent: true,
@@ -301,19 +558,63 @@ export function LeafletFallbackMap(
       }).addTo(map);
     });
 
-    // Save view state on move
+    // Save view state on move (debounced — a touch flick settles repeatedly)
+    // and publish bounds for the wind overlay.
+    let saveTimer = 0;
+    const publishBounds = () => {
+      const b = map.getBounds();
+      mapBounds.value = {
+        north: b.getNorth(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        west: b.getWest(),
+      };
+    };
+    publishBounds();
     map.on("moveend", () => {
       const center = map.getCenter();
       const z = map.getZoom();
-      localStorage.setItem(
-        "radar-map-view",
-        JSON.stringify({ lng: center.lng, lat: center.lat, zoom: z }),
-      );
+      publishBounds();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        try {
+          localStorage.setItem(
+            getViewKey(),
+            JSON.stringify({ lng: center.lng, lat: center.lat, zoom: z }),
+          );
+        } catch { /* private mode / quota */ }
+      }, 400) as unknown as number;
     });
 
     mapRef.current = map;
 
+    // Leaflet 1.9 binds only `window.resize`; it has NO ResizeObserver. A
+    // detent change or an orientation change therefore leaves it with a stale
+    // pixel origin (tiles offset, clicks landing in the wrong place).
+    let resizeTimer = 0;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(
+        () => map.invalidateSize({ animate: false }),
+        80,
+      ) as unknown as number;
+    });
+    ro.observe(mapContainer.current);
+
+    const onDetent = () => map.invalidateSize({ animate: false });
+    const onOrient = () =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => map.invalidateSize({ animate: false }))
+      );
+    globalThis.addEventListener("icaw:detent", onDetent);
+    globalThis.addEventListener("orientationchange", onOrient);
+
     return () => {
+      clearTimeout(saveTimer);
+      clearTimeout(resizeTimer);
+      ro.disconnect();
+      globalThis.removeEventListener("icaw:detent", onDetent);
+      globalThis.removeEventListener("orientationchange", onOrient);
       map.remove();
       mapRef.current = null;
     };
@@ -358,7 +659,7 @@ export function LeafletFallbackMap(
     if (!animationReady.value) {
       setTimeout(() => {
         animationReady.value = true;
-        isPlaying.value = true;
+        if (!reduceMotion) isPlaying.value = true;
       }, 1500);
     }
   }, [frames.value]);
@@ -552,8 +853,12 @@ export function LeafletFallbackMap(
   }
 
   function handleRecenter() {
-    mapRef.current?.setView([latitude, longitude], zoom);
-    localStorage.removeItem("radar-map-view");
+    mapRef.current?.setView([latitude, longitude], zoom, {
+      animate: !reduceMotion,
+    });
+    try {
+      localStorage.removeItem(getViewKey());
+    } catch { /* private mode */ }
   }
 
   function handleStepBack() {
@@ -586,78 +891,152 @@ export function LeafletFallbackMap(
         <div class="layer-loading-overlay">
           <div class="layer-loading-spinner" />
           <span class="layer-loading-text">
-            Loading{" "}
-            {activeLayer.value === "precip"
+            Loading {activeLayer.value === "precip"
               ? "24h Precipitation"
               : "Echo Tops"}...
           </span>
         </div>
       )}
 
-      <AudioToggle
-        onToggle={(enabled) => {
-          if (enabled) audioAlerts.enable();
-          else audioAlerts.disable();
+      {/* Wind particle field — canvas only, works without WebGL. */}
+      <WindField
+        windData={windData.value}
+        mapBounds={mapBounds.value ?? {
+          north: latitude + 4,
+          south: latitude - 4,
+          east: longitude + 4,
+          west: longitude - 4,
         }}
+        isVisible={windEnabled.value}
       />
 
-      <div class="radar-timestamp">
-        {frameIndex.value === 0 && activeLayer.value === "radar"
-          ? (
-            <div class="live-indicator">
-              <div class="live-dot" />
-              <span class="live-text">LIVE</span>
-              <span style={{ marginLeft: "8px" }}>
-                {timestamp.value || "Loading..."}
-              </span>
-            </div>
-          )
-          : timestamp.value || "Loading..."}
+      {
+        /* TOP RAIL — same three `.map-chrome` wrappers, same order, as
+          islands/RadarMap.tsx, so every responsive rule applies here too. */
+      }
+      <div class="map-chrome map-chrome--top">
+        <div class="radar-timestamp">
+          {frameIndex.value === 0 && activeLayer.value === "radar"
+            ? (
+              <div class="live-indicator">
+                <div class="live-dot" />
+                <span class="live-text">LIVE</span>
+                <span class="live-time">{timestamp.value || "Loading..."}</span>
+              </div>
+            )
+            : timestamp.value || "Loading..."}
+        </div>
+
+        <AudioToggle
+          onToggle={(enabled) => {
+            if (enabled) audioAlerts.enable();
+            else audioAlerts.disable();
+          }}
+        />
+
+        <MapToolsSheet
+          open={toolsOpen}
+          showAlertPolygons={showAlertPolygons}
+          showLightning={showLightning}
+          showStormReports={stormReportsEnabled}
+          showWind={windEnabled}
+          showMiniMap={showMiniMap}
+          showHourly={showHourly}
+          stormReportCount={stormReports.value.length}
+          lightningCount={lightningStrikes.value.length}
+        />
+
+        <LayerControl
+          activeLayer={activeLayer.value}
+          onLayerChange={(l) => (activeLayer.value = l)}
+          windEnabled={windEnabled.value}
+          onWindToggle={() => (windEnabled.value = !windEnabled.value)}
+          stormReportsEnabled={stormReportsEnabled.value}
+          stormReportCount={stormReports.value.length}
+          onStormReportsToggle={() => (stormReportsEnabled.value =
+            !stormReportsEnabled.value)}
+        />
+
+        {
+          /* Regional View is the ONE feature this path genuinely cannot
+            provide: the mini-map is a second MapLibre instance. It is marked
+            unavailable rather than left as a control that silently no-ops. */
+        }
+        <FeatureToggles
+          showAlertPolygons={showAlertPolygons}
+          showLightning={showLightning}
+          showStormReports={stormReportsEnabled}
+          showWind={windEnabled}
+          showMiniMap={showMiniMap}
+          showHourly={showHourly}
+          unavailable={["Regional View"]}
+        />
+
+        {showLightning.value && lightningStrikes.value.length > 0 && (
+          <LightningOverlay strikes={lightningStrikes.value} />
+        )}
       </div>
 
-      <LayerControl
-        activeLayer={activeLayer.value}
-        onLayerChange={(l) => activeLayer.value = l}
-        windEnabled={windEnabled.value}
-        onWindToggle={() => windEnabled.value = !windEnabled.value}
-        stormReportsEnabled={stormReportsEnabled.value}
-        stormReportCount={stormReports.value.length}
-        onStormReportsToggle={() =>
-          stormReportsEnabled.value = !stormReportsEnabled.value}
-      />
-
-      {activeLayer.value === "radar" && frames.value.length > 0 && (
-        <AnimationControls
-          isPlaying={isPlaying.value}
-          onPlayPause={() => isPlaying.value = !isPlaying.value}
-          frameIndex={frameIndex.value}
-          totalFrames={frames.value.length}
-          onFrameChange={handleFrameChange}
-          speed={animationSpeed.value}
-          onSpeedChange={(s) => animationSpeed.value = s}
-          onStepBack={handleStepBack}
-          onStepForward={handleStepForward}
+      {/* RIGHT RAIL */}
+      <div class="map-chrome map-chrome--rail">
+        <ZoomControls
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onRecenter={handleRecenter}
         />
-      )}
+        {showMiniMap.value && (
+          <div class="mini-map-container">
+            <div class="mini-map-header">
+              <span>Regional View</span>
+              <button
+                type="button"
+                class="mini-map-close"
+                onClick={() => (showMiniMap.value = false)}
+                title="Close regional view"
+                aria-label="Close regional view"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <span class="deck-unsupported-note">
+              Not available without WebGL
+            </span>
+          </div>
+        )}
+      </div>
 
-      <ZoomControls
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onRecenter={handleRecenter}
-      />
-
-      {activeLayer.value === "velocity" ? <VelocityLegend /> : <RadarLegend />}
-
-      <FeatureToggles
-        showAlertPolygons={showAlertPolygons}
-        showLightning={showLightning}
-        showStormReports={stormReportsEnabled}
-        showWind={windEnabled}
-        showMiniMap={showMiniMap}
-        showHourly={showHourly}
-      />
-
-      {showHourly.value && <HourlyForecast />}
+      {/* BOTTOM STACK */}
+      <div class="map-chrome map-chrome--bottom">
+        {showHourly.value && <HourlyForecast />}
+        <LegendSheet
+          activeLayer={activeLayer.value}
+          windEnabled={windEnabled.value}
+        />
+        {activeLayer.value === "radar" && frames.value.length > 0 && (
+          <AnimationControls
+            isPlaying={isPlaying.value}
+            onPlayPause={() => (isPlaying.value = !isPlaying.value)}
+            frameIndex={frameIndex.value}
+            totalFrames={frames.value.length}
+            onFrameChange={handleFrameChange}
+            speed={animationSpeed.value}
+            onSpeedChange={(s) => (animationSpeed.value = s)}
+            onStepBack={handleStepBack}
+            onStepForward={handleStepForward}
+          />
+        )}
+      </div>
     </div>
   );
 }

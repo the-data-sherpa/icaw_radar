@@ -1,7 +1,7 @@
 {
   "nodeModulesDir": "auto",
   "tasks": {
-    "check": "deno fmt --check . && deno lint . && deno check",
+    "check": "deno fmt --check . && deno lint . && deno check && deno run -A scripts/check-deck-scope.ts",
     "dev": "deno run -A npm:vite",
     "dev:build": "deno run -A npm:vite build && deno run -A scripts/patch-routes.ts && deno serve -A --watch _fresh/server.js",
     "build": "deno run -A npm:vite build && deno run -A scripts/patch-routes.ts",

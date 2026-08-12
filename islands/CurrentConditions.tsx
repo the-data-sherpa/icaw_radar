@@ -141,9 +141,7 @@ export default function CurrentConditions() {
           <span class="value">
             {c.windSpeed !== null
               ? `from ${c.windDirection} ${c.windSpeed}`
-              : "--"}
-            {" "}
-            mph
+              : "--"} mph
             {c.windGust !== null && ` G${c.windGust}`}
           </span>
         </div>
@@ -158,7 +156,14 @@ export default function CurrentConditions() {
       {/* Data Freshness Indicator */}
       <div class={`data-freshness ${isStale ? "stale" : "fresh"}`}>
         <span>Updated {freshnessText.value}</span>
-        {isStale && <span title="Data may be stale">⚠</span>}
+        {isStale && (
+          <>
+            <span aria-hidden="true">⚠</span>
+            <span class="data-freshness-reason deck-only">
+              Data may be stale
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

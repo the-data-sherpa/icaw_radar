@@ -18,6 +18,17 @@ export function MiniMap(
   const mapRef = useRef<MapLibreMap>(null);
 
   useEffect(() => {
+    // Mounted on demand only: the component returns null while !isVisible, so
+    // this effect (and therefore the second WebGL context) never runs until the
+    // user asks for the regional view.
+    //
+    // KNOWN RISK: iOS Safari caps the number of concurrent WebGL contexts per
+    // page (historically 8, but far lower under memory pressure). When the cap
+    // is hit the OLDEST context is dropped, which here is the main radar canvas
+    // — opening the regional view can therefore blank the main map on an older
+    // iPhone. Mitigation in this pass is on-demand mounting plus the unmount
+    // teardown below (map.remove() releases the context). A full fix would
+    // render this preview from a static raster instead of a live GL map.
     if (!containerRef.current || !isVisible) return;
 
     // deno-lint-ignore no-explicit-any
@@ -166,6 +177,7 @@ export function MiniMap(
             class="mini-map-close"
             onClick={onClose}
             title="Close regional view"
+            aria-label="Close regional view"
           >
             <svg
               width="12"
@@ -174,6 +186,7 @@ export function MiniMap(
               fill="none"
               stroke="currentColor"
               stroke-width="2"
+              aria-hidden="true"
             >
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />

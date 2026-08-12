@@ -54,6 +54,24 @@ export function StormReports({ map, visible }: StormReportsProps) {
     { report: StormReport; x: number; y: number } | null
   >(null);
 
+  // On a coarse pointer the popup is docked by CSS above the transport bar
+  // instead of floating at a projected pixel, so it is always fully on-screen.
+  const coarse = globalThis.matchMedia?.("(pointer: coarse)").matches ?? false;
+
+  /** Keeps a floating popup inside the map container. */
+  function clampPopup(
+    p: { report: StormReport; x: number; y: number },
+  ) {
+    const rect = map?.getCanvas?.()?.getBoundingClientRect?.();
+    if (!rect) return p;
+    const halfWidth = 140; // .storm-report-popup is 280px wide
+    return {
+      report: p.report,
+      x: Math.min(Math.max(p.x, halfWidth + 8), rect.width - halfWidth - 8),
+      y: Math.min(Math.max(p.y, 24), rect.height - 8),
+    };
+  }
+
   // Fetch storm reports
   useEffect(() => {
     async function fetchReports() {
@@ -79,8 +97,12 @@ export function StormReports({ map, visible }: StormReportsProps) {
 
     const sourceId = "storm-reports-source";
     const layerId = "storm-reports-layer";
+    const hitLayerId = "storm-reports-hit";
 
     // Remove existing layers/sources if they exist
+    if (map.getLayer(hitLayerId)) {
+      map.removeLayer(hitLayerId);
+    }
     if (map.getLayer(layerId)) {
       map.removeLayer(layerId);
     }
@@ -150,10 +172,21 @@ export function StormReports({ map, visible }: StormReportsProps) {
       },
     });
 
+    // Invisible hit layer. The painted circles are 8px (10px if recent), i.e.
+    // a 16-20px tap diameter, and they are the ONLY route to storm report
+    // detail. This raises the effective target to ~44px without changing a
+    // single rendered pixel.
+    map.addLayer({
+      id: hitLayerId,
+      type: "circle",
+      source: sourceId,
+      paint: { "circle-radius": 22, "circle-opacity": 0 },
+    });
+
     // Handle click events
     map.on(
       "click",
-      layerId,
+      hitLayerId,
       (
         e: {
           features?: { properties: Record<string, unknown> }[];
@@ -178,37 +211,70 @@ export function StormReports({ map, visible }: StormReportsProps) {
         };
 
         const point = map.project([e.lngLat.lng, e.lngLat.lat]);
-        activePopup.value = { report, x: point.x, y: point.y };
+        activePopup.value = clampPopup({
+          report,
+          x: point.x,
+          y: point.y,
+        });
       },
     );
 
     // Change cursor on hover
-    map.on("mouseenter", layerId, () => {
+    map.on("mouseenter", hitLayerId, () => {
       map.getCanvas().style.cursor = "pointer";
     });
 
-    map.on("mouseleave", layerId, () => {
+    map.on("mouseleave", hitLayerId, () => {
       map.getCanvas().style.cursor = "";
     });
 
     return () => {
-      if (map.getLayer(layerId)) {
-        map.off("click", layerId);
-        map.off("mouseenter", layerId);
-        map.off("mouseleave", layerId);
+      if (map.getLayer(hitLayerId)) {
+        map.off("click", hitLayerId);
+        map.off("mouseenter", hitLayerId);
+        map.off("mouseleave", hitLayerId);
       }
     };
   }, [map, visible, reports.value]);
+
+  // Re-project the popup while the map moves so it stays attached to its
+  // report instead of drifting off during a pan/inertia flick.
+  useEffect(() => {
+    if (!map || coarse) return;
+    const onMove = () => {
+      const current = activePopup.value;
+      if (!current) return;
+      const point = map.project([current.report.lon, current.report.lat]);
+      activePopup.value = clampPopup({
+        report: current.report,
+        x: point.x,
+        y: point.y,
+      });
+    };
+    map.on("move", onMove);
+    return () => map.off("move", onMove);
+  }, [map]);
 
   // Close popup when clicking elsewhere on the map
   useEffect(() => {
     if (!map) return;
 
     const handleMapClick = (
-      e: { originalEvent: { target: EventTarget | null } },
+      e: {
+        originalEvent: { target: EventTarget | null };
+        point: { x: number; y: number };
+      },
     ) => {
-      // Only close if not clicking on a storm report
+      // Only close if not clicking on a storm report. Testing the rendered
+      // features is order-independent; relying on listener registration order
+      // (the layer handler happening to run last) is not.
       if (!e.originalEvent.target) return;
+      if (map.getLayer("storm-reports-hit")) {
+        const hits = map.queryRenderedFeatures(e.point, {
+          layers: ["storm-reports-hit"],
+        });
+        if (hits.length > 0) return;
+      }
       activePopup.value = null;
     };
 
@@ -263,7 +329,8 @@ export function StormReports({ map, visible }: StormReportsProps) {
   return (
     <div
       class={`storm-report-popup ${isRecent ? "report-recent" : ""}`}
-      style={{
+      data-anchor={coarse ? "dock" : "float"}
+      style={coarse ? undefined : {
         position: "absolute",
         left: `${x}px`,
         top: `${y - 10}px`,
@@ -308,7 +375,7 @@ export function StormReports({ map, visible }: StormReportsProps) {
         type="button"
         class="popup-close"
         onClick={() => activePopup.value = null}
-        aria-label="Close popup"
+        aria-label="Close storm report"
       >
         x
       </button>

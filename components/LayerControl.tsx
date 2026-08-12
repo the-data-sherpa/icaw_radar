@@ -17,17 +17,9 @@ export function LayerControl({
   stormReportCount = 0,
   onStormReportsToggle,
 }: LayerControlProps) {
-  const buttonBase = {
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    padding: "6px 12px",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontWeight: 600,
-    fontSize: "12px",
-    textTransform: "uppercase" as const,
-    transition: "all 0.2s ease",
-  };
-
+  // NOTE: layout/typography live in broadcast.css (.layer-control,
+  // .layer-control-btn). Only the dynamic active colors stay inline —
+  // everything else must be reachable by a stylesheet.
   const layers = [
     {
       id: "radar",
@@ -50,26 +42,15 @@ export function LayerControl({
   ] as const;
 
   return (
-    <div
-      class="layer-control"
-      style={{
-        position: "absolute",
-        top: "16px",
-        left: "16px",
-        zIndex: 100,
-        display: "flex",
-        gap: "8px",
-        padding: "8px",
-        borderRadius: "8px",
-      }}
-    >
+    <div class="layer-control layer-control--strip">
       {layers.map((layer) => (
         <button
           type="button"
           key={layer.id}
+          class="layer-control-btn layer-control-btn--product"
           onClick={() => onLayerChange(layer.id)}
+          aria-pressed={activeLayer === layer.id}
           style={{
-            ...buttonBase,
             background: activeLayer === layer.id
               ? layer.activeColor
               : "transparent",
@@ -86,17 +67,16 @@ export function LayerControl({
       {onWindToggle && (
         <button
           type="button"
+          class="layer-control-btn layer-control-btn--toggle"
           onClick={onWindToggle}
           title="Toggle animated wind particle overlay (W key)"
+          aria-label="Wind field overlay"
+          aria-pressed={windEnabled}
           style={{
-            ...buttonBase,
             background: windEnabled
               ? "linear-gradient(135deg, #4a94a9 0%, #4da75b 100%)"
               : "transparent",
             color: windEnabled ? "#fff" : "rgba(255, 255, 255, 0.7)",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
           }}
         >
           {/* Wind icon SVG */}
@@ -106,9 +86,10 @@ export function LayerControl({
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
           >
             <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2" />
           </svg>
@@ -122,19 +103,18 @@ export function LayerControl({
           type="button"
           onClick={onStormReportsToggle}
           title="Toggle NWS Local Storm Reports (LSR) overlay"
-          class={`storm-reports-btn ${
+          aria-label={stormReportCount > 0
+            ? `Storm reports overlay, ${stormReportCount} reports`
+            : "Storm reports overlay"}
+          aria-pressed={stormReportsEnabled}
+          class={`layer-control-btn layer-control-btn--toggle storm-reports-btn ${
             stormReportCount > 0 ? "has-reports" : ""
           }`}
           style={{
-            ...buttonBase,
             background: stormReportsEnabled
               ? "linear-gradient(135deg, #ff4444 0%, #ff8800 100%)"
               : "transparent",
             color: stormReportsEnabled ? "#fff" : "rgba(255, 255, 255, 0.7)",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            position: "relative",
           }}
         >
           {/* Warning triangle icon */}
@@ -144,9 +124,10 @@ export function LayerControl({
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
           >
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />

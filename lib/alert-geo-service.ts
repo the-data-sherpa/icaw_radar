@@ -1,5 +1,9 @@
 import { alertCache } from "./cache.ts";
-import { getAlertColor, isEmergencyAlert, WATCH_EVENTS } from "./alert-service.ts";
+import {
+  getAlertColor,
+  isEmergencyAlert,
+  WATCH_EVENTS,
+} from "./alert-service.ts";
 
 const NWS_API_BASE = "https://api.weather.gov";
 const USER_AGENT = "ICAW-Radar/1.0 (weather@example.com)";
@@ -19,7 +23,9 @@ function normalizeGeometry(geometry: any): any | null {
     return geometry;
   }
 
-  if (geometry.type === "GeometryCollection" && Array.isArray(geometry.geometries)) {
+  if (
+    geometry.type === "GeometryCollection" && Array.isArray(geometry.geometries)
+  ) {
     const polygons = geometry.geometries.filter(
       // deno-lint-ignore no-explicit-any
       (g: any) => SUPPORTED_GEOMETRY_TYPES.has(g.type),

@@ -1,0 +1,1671 @@
+/* ICAW deck.css - public site only. NEVER linked from /overlay.
+ *
+ * HARD RULE: every selector in this file begins `html.web`.
+ *   enforced by scripts/check-deck-scope.ts in `deno task check`.
+ *
+ * Specificity contract: `html.web` is one class + one type, so
+ *   html.web .radar-legend  beats  .theme-day .radar-legend
+ * (same class count, one more type selector). For properties ALSO set by a
+ * .theme-day / .theme-night / .theme-golden rule, prefer the compound form
+ * `html.web .broadcast-layout X` rather than relying on a source-order tie.
+ * Contested set (read from the theme blocks in broadcast.css):
+ *   .sidebar .clock .city-forecast-list .sun-moon-widget .radar-container
+ *   .radar-legend .layer-control .animation-controls .radar-timestamp
+ *   .zoom-controls button .audio-toggle .station-id .city-list-header
+ *   .live-dot .live-text .timeline-progress .hour-item.now .hour-precip
+ *   .separator .weather-detail .label .moon-emoji
+ *
+ * DO NOT ADD container-type ANYWHERE. It is not needed (the OBS route never
+ * loads this file, and the desktop sidebar only exists at >=64rem where these
+ * rules are off) and it makes the element a containing block for
+ * position:fixed descendants - which would silently re-anchor .alert-overlay,
+ * .alert-popup, .storm-report-popup, .alert-tooltip and .city-hourly-panel
+ * (a DOM child of .city-forecast-list).
+ *
+ * DO NOT reintroduce document scroll below 64rem. The full-bleed map runs with
+ * cooperativeGestures:false (one-finger pan). That is only safe because
+ * html/body are overflow:clip here.
+ *
+ * MARKUP CONTRACT for the map: .map-chrome--bottom and .map-chrome--rail carry
+ * a `translate`, which makes them containing blocks for position:fixed
+ * descendants. .deck-tools-sheet, .deck-legend-sheet, .deck-backdrop and
+ * .deck-alert-chip must therefore NOT be authored inside those two wrappers;
+ * they belong directly in .radar-container (or higher). .deck-legend-chip and
+ * .deck-tools-btn are the only new controls that live inside a chrome wrapper.
+ *
+ * BREAKPOINTS - derived from THIS app's content.
+ *   The broadcast grid's real failure point is:
+ *     180px sidebar + .animation-controls{right:300px} legend clearance
+ *     + a ~450px .layer-control row + a ~200px .radar-timestamp
+ *   => the composition degrades between ~960px and ~1024px.
+ *   768px is deliberately NOT the line: 768x1024 is iPad portrait, i.e.
+ *   exactly the width where the desktop grid is already broken.
+ *   Custom properties are illegal in media conditions, so these literals are
+ *   the source of truth:
+ *
+ *     max-width: 63.999rem                        <1024   THE DECK
+ *     max-width: 47.999rem                        <768    phone deltas
+ *     max-width: 29.999rem                        <480    compact phone
+ *     min-width: 48rem and max-width: 63.999rem   768-1023 tablet portrait
+ *     min-width: 64rem                            >=1024  broadcast restored
+ *     max-height: 32rem and (orientation:landscape)  sheet -> right rail
+ *
+ *     pointer: coarse                  44/48px targets, no backdrop-blur
+ *     hover: hover and pointer: fine   where NEW hover styling is authored
+ *     hover: none                      neutralise latching :hover rules
+ *     prefers-reduced-motion: reduce   still the infinite keyframes
+ */
+
+/* ============================================================
+   C - TOKENS + SHELL UNPIN (all widths)
+   ============================================================ */
+
+html.web {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+
+  --safe-t: max(8px, env(safe-area-inset-top, 0px));
+  --safe-r: max(8px, env(safe-area-inset-right, 0px));
+  --safe-b: max(8px, env(safe-area-inset-bottom, 0px));
+  --safe-l: max(8px, env(safe-area-inset-left, 0px));
+
+  --tap-min: 24px;
+  --tap-gap: 8px;
+
+  /* PEEK is the fully-collapsed rest state: the grab handle and nothing else,
+     so the radar owns the screen until the user pulls the sheet up. It is a
+     constant (not a svh fraction) because it is measuring one control, not a
+     share of the viewport. --deck-grip-h must match .deck-grip's height. */
+  --deck-grip-h: 48px;
+  --deck-peek: calc(var(--deck-grip-h) + var(--safe-b));
+  --deck-half: 52svh;
+  --deck-full: 88svh;
+  --deck-detent: var(--deck-peek);
+  --deck-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --deck-dur: 0.26s;
+
+  /* How far .map-chrome--rail sits above the detent, i.e. the height of
+     .map-chrome--bottom. NOT a guess - it is the sum of that stack:
+       .animation-controls  ~118px (10px pad + 48px transport row + 8px gap
+                            + timeline row + 10px pad)
+       + 8px flex gap
+       + .deck-legend-chip   44px
+       + 8px bottom padding
+     = ~178 -> 190px with headroom for a wrapped speed control. */
+  --deck-rail-offset: 190px;
+}
+
+/* ...and the hourly strip adds ~120px when it is on. It is CONDITIONALLY
+   RENDERED (islands/RadarMap.tsx: `{showHourly.value && <HourlyForecast />}`),
+   so :has() reads the real stack height with no JS and no hardcoded worst
+   case. Without this the z-510 rail paints over the z-500 hourly scroller
+   and the legend chip. If islands/RadarMap.tsx ever grows a ResizeObserver
+   that writes --deck-rail-offset as an inline style on <html>, that inline
+   style wins over this rule, which is the correct precedence. */
+html.web:has(.hourly-forecast) {
+  --deck-rail-offset: 310px;
+}
+
+/* No :has() (pre-2023 engines): assume the tall stack rather than overlap. */
+@supports not selector(:has(*)) {
+  html.web {
+    --deck-rail-offset: 310px;
+  }
+}
+
+html.web[data-detent="half"] {
+  --deck-detent: var(--deck-half);
+}
+
+html.web[data-detent="full"] {
+  --deck-detent: var(--deck-full);
+}
+
+/* THE UNPIN. At exactly 1920x1080 these compute identically to the
+   1920px/1080px values pinned in broadcast.css. Below 1920 it is a strict
+   fix: today a 1440px laptop gets a 1920px document with overflow:hidden,
+   so 480px of map is permanently unreachable with no scrollbar.
+   (It also repairs .city-hourly-panel, which is position:fixed with
+   height:calc(100vh - var(--ticker-height)) - viewport-relative inside a
+   canvas that used to be pinned to a different height.)
+
+   DESKTOP OVERLAP SWEEP for the widths this newly makes reachable
+   (1024 / 1280 / 1366 / 1440 / 1600 / 1920). Map area W = viewport - 180px
+   sidebar. Every pair that can collide, from broadcast.css:
+
+     top band, y 16..52
+       .layer-control   left:16, ~450px wide  -> [16, 466]
+       .audio-toggle    right:180, 36px wide  -> [W-216, W-180]
+       .radar-timestamp right:16, <=200px     -> [W-216, W-16]
+     The two right-anchored boxes hold a FIXED relationship to each other at
+     every width (this is why the audio toggle's 180px offset already works
+     at 1920). The only width-dependent pair is layer-control vs the right
+     cluster: they touch when 466 > W-216, i.e. W < 682, i.e. viewport
+     < 862px - below the 1024px deck line, where none of this applies.
+     Clearance at the worst supported width (1024 => W=844) is 162px.
+
+     second band, y 60..84
+       .feature-toggles left:16 (~150px), .lightning-count right:16 (~130px)
+     Touch below a ~300px map area. Not reachable above 1024.
+
+     bottom band
+       .animation-controls left:16 right:300  -> [16, W-300]
+       .radar-legend       right:16, >=274px  -> [W-290, W-16]
+     Both right edges are right-anchored, so the 10px gap between W-300 and
+     W-290 is width-invariant. .animation-controls' own content floor is
+     ~430px, reached at W=746 (viewport 926) - again below the deck line.
+       .zoom-controls bottom:100 clears .animation-controls (top edge ~76)
+       and .radar-legend (~66) at every width.
+
+   Result: no new collision is introduced anywhere in 1024-1919, and above
+   1920 every anchor simply moves further apart. If the fixed 1920x1080
+   canvas is ever wanted back above 64rem, uncomment this and nothing else:
+
+     @media (min-width: 120rem) {
+       html.web, html.web body { width: 1920px; height: 1080px; }
+       html.web .broadcast-layout { width: 1920px; height: 1080px; }
+     }
+*/
+html.web,
+html.web body {
+  width: 100%;
+  height: 100%;
+}
+
+html.web .broadcast-layout {
+  width: 100%;
+  height: 100vh; /* fallback */
+  height: 100svh;
+}
+
+/* ============================================================
+   D - CROSS-CUTTING A11Y (all widths, site route only)
+   ============================================================ */
+
+/* broadcast.css declares no focus styling at all. A two-tone ring
+   guarantees 3:1 contrast over dark chrome AND over bright radar returns. */
+html.web :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.85);
+  border-radius: 4px;
+}
+
+html.web :is(button, a, [role="button"]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* WCAG 2.2.2 still needs a way to stop the desktop marquee, but the button was
+   unwanted chrome next to the ticker label. It is now off-screen until it takes
+   keyboard focus, at which point it becomes a normal visible control. Pointer
+   users get the same result by hovering the ticker (islands/NewsTicker.tsx),
+   and reduced-motion users never see it move at all. */
+html.web .ticker-pause {
+  /* `display` MUST be set here: broadcast.css hides .ticker-pause outright, and
+     a display:none element cannot take focus, which would leave the marquee
+     with no pause mechanism at all. Clipped rather than hidden. */
+  display: inline-flex;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* `:focus`, not `:focus-visible`: the control is off-screen, so the only way to
+   reach it at all is keyboard or AT. Matching plain focus makes it reveal
+   reliably (`:focus-visible` skips programmatic focus on buttons). */
+html.web .ticker-pause:focus {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  min-width: 24px;
+  min-height: 24px;
+  margin: 0 8px 0 0;
+  overflow: visible;
+  clip-path: none;
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Long unbounded NWS strings must wrap, not overflow. Only elements that are
+   absent from the 1920x1080 baseline render are touched at every width;
+   .city-name / .weather-detail / .city-item are deferred to the deck block so
+   desktop line breaking is byte-identical to today. */
+html.web :is(.alert-popup-headline, .alert-popup-area, .alert-overlay-headline, .alert-overlay-area, .ticker-list-item, .radar-text-alt-list li) {
+  overflow-wrap: anywhere;
+}
+
+html.web :is(.alert-popup, .storm-report-popup) > * {
+  min-width: 0;
+}
+
+/* ============================================================
+   E - CAPABILITY QUERIES (width-independent)
+   ============================================================ */
+
+/* hover:none first, so the pointer:coarse surface rules below win ties. */
+@media (hover: none) {
+  /* -webkit-tap-highlight-color:transparent (set under pointer:coarse)
+     removes tap acknowledgement, so it is only ever set together with
+     this replacement. */
+  html.web :is(button, a, [role="button"]):active {
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  /* Neutralise the latching :hover rules. Values below are the base
+     (non-hover) values read straight out of broadcast.css, so a latched
+     :hover after a tap is visually indistinguishable from rest. */
+  html.web .timeline-handle:hover {
+    transform: translate(-50%, -50%);
+  }
+
+  html.web .hour-item:hover {
+    transform: none;
+  }
+
+  html.web .hour-item:hover:not(.now) {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  html.web .audio-toggle:hover {
+    transform: none;
+    background: rgba(10, 10, 10, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  html.web .audio-toggle.enabled:hover {
+    box-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
+  }
+
+  html.web .storm-report-marker:hover {
+    transform: none;
+  }
+
+  html.web .theme-indicator:hover {
+    transform: none;
+    opacity: 0.7;
+  }
+
+  html.web .city-item:hover:not(.selected) {
+    background: transparent;
+  }
+
+  html.web .city-hourly-item:hover:not(.now) {
+    background: transparent;
+  }
+
+  html.web .animation-controls button:hover:not(.active) {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  html.web .zoom-controls button:hover {
+    background: rgba(10, 10, 10, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  html.web .mini-map-toggle:hover,
+  html.web .feature-toggles-btn:hover {
+    background: rgba(10, 10, 10, 0.6);
+  }
+
+  html.web .mini-map-close:hover {
+    opacity: 0.7;
+    color: var(--text-muted);
+  }
+
+  html.web .feature-toggle-item:hover {
+    background: transparent;
+  }
+
+  html.web .city-hourly-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-secondary);
+  }
+
+  html.web .alert-overlay-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  html.web .storm-report-popup .popup-close:hover {
+    color: var(--text-muted);
+  }
+
+  html.web .alert-popup .popup-close:hover {
+    color: #aaa;
+  }
+}
+
+@media (pointer: coarse) {
+  html.web {
+    --tap-min: 44px;
+  }
+
+  /* 44px minimum hit area. Where the painted size is load-bearing (map dots,
+     legend swatches, the timeline handle) the box is left alone and a
+     transparent expander is used instead. */
+  html.web :is(.animation-controls button, .speed-control button, .zoom-controls button, .audio-toggle, .mini-map-toggle, .feature-toggles-btn, .city-hourly-close, .alert-overlay-close, .storm-report-popup .popup-close, .alert-popup .popup-close, .layer-control-btn, .deck-tools-btn, .deck-legend-chip, .deck-tools-close, .deck-legend-close, .ticker-pause, .deck-alert-chip) {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+    touch-action: manipulation;
+  }
+
+  html.web :is(.city-item, .hour-item, .feature-toggle-item, .deck-tools-row, .ticker-list-item, .city-hourly-item) {
+    min-height: 44px;
+  }
+
+  /* Expanded regions must not overlap. Both are 4px today. */
+  html.web .zoom-controls,
+  html.web .speed-control {
+    gap: max(8px, var(--tap-gap));
+  }
+
+  /* .mini-map-close is a 12px glyph in 2px of padding - the smallest
+     interactive element in the app. */
+  html.web .mini-map-close {
+    position: relative;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Timeline: keep the 8px painted bar, grow the hit box. Duplicated from
+     the deck block on purpose - this arm covers TOUCH ABOVE 1024px (a
+     touchscreen laptop still running the broadcast grid), where the deck
+     rules are off. Below 1024px the deck block does it regardless of
+     pointer type, because SC 2.5.8 has no pointer-type exemption.
+     .timeline-bar has overflow:hidden, which would clip the overlaid input,
+     so open it here - .timeline-progress carries its own border-radius, so
+     this is visually identical.
+     NOTE the property order: `inset-block` is a shorthand for top+bottom, so
+     it MUST come before `top`, or it resets it back to auto. */
+  html.web .timeline-bar {
+    overflow: visible;
+  }
+
+  html.web .timeline-range {
+    inset-block: 50% auto;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+
+  html.web .timeline-handle {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* ~32 backdrop-filter surfaces, about a dozen of them stacked over a
+     continuously repainting WebGL canvas => a backdrop re-snapshot and
+     re-blur on every map frame. Swap for opaque. The :hover duplicate keeps
+     a latched hover from restoring the translucent value. */
+  html.web .broadcast-layout :is(.layer-control, .animation-controls, .zoom-controls button, .audio-toggle, .layer-loading-overlay, .mini-map-toggle, .feature-toggles-btn, .feature-toggles-panel, .storm-report-popup, .lightning-count, .wind-legend, .city-hourly-panel, .alert-popup),
+  html.web .broadcast-layout :is(.layer-control, .animation-controls, .zoom-controls button, .audio-toggle, .layer-loading-overlay, .mini-map-toggle, .feature-toggles-btn, .feature-toggles-panel, .storm-report-popup, .lightning-count, .wind-legend, .city-hourly-panel, .alert-popup):hover {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgb(10 10 10 / 0.92);
+  }
+
+  html.web :is(button, a, [role="button"]) {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html.web .deck-tools-btn:hover,
+  html.web .deck-legend-chip:hover,
+  html.web .ticker-pause:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.web *,
+  html.web *::before,
+  html.web *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  html.web .live-indicator .live-dot,
+  html.web .live-dot {
+    opacity: 1;
+  }
+
+  html.web .deck-sheet,
+  html.web .map-chrome--bottom,
+  html.web .map-chrome--rail {
+    transition: none;
+  }
+}
+
+/* ============================================================
+   F - THE DECK: below 64rem (1024px)
+   ============================================================ */
+
+@media (max-width: 63.999rem) {
+  /* --- F1. SHELL ---------------------------------------------- */
+
+  html.web {
+    color-scheme: dark;
+  }
+
+  html.web,
+  html.web body {
+    overflow: clip;
+    overscroll-behavior: none;
+  }
+
+  html.web .city-name {
+    overflow-wrap: anywhere;
+  }
+
+  html.web :is(.weather-detail, .city-item) > * {
+    min-width: 0;
+  }
+
+  /* display:block, not grid: nothing below is in flow, and this removes the
+     risk of .alert-overlay / .theme-indicator being auto-placed into a
+     phantom grid row. */
+  html.web .broadcast-layout {
+    display: block;
+    position: relative;
+    overflow: clip;
+  }
+
+  /* --- F2. MAP IS THE VIEWPORT -------------------------------- */
+
+  html.web .broadcast-layout .radar-container {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: 100svh;
+    z-index: 0;
+    background: var(--bg-primary);
+  }
+
+  html.web .radar-map {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* --- F3. MAP CHROME WRAPPERS BECOME REAL BOXES -------------- */
+
+  html.web .map-chrome--top {
+    display: flex;
+    position: fixed;
+    inset-block-start: var(--safe-t);
+    inset-inline: var(--safe-l) var(--safe-r);
+    z-index: 520;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  html.web .map-chrome--top > * {
+    pointer-events: auto;
+  }
+
+  /* The desktop/OBS status cluster dissolves here so .radar-timestamp and
+     .audio-toggle stay direct flex children of the rail above, which is what
+     the deck's ordering and sizing rules target. */
+  html.web .map-status-cluster {
+    display: contents;
+  }
+
+  html.web .map-chrome--rail {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+    position: fixed;
+    inset-inline-end: var(--safe-r);
+    inset-block-end: var(--deck-rail-offset);
+    z-index: 510;
+    translate: 0 calc(-1 * var(--deck-detent));
+    transition: translate var(--deck-dur) var(--deck-ease);
+    pointer-events: none;
+  }
+
+  html.web .map-chrome--rail > * {
+    pointer-events: auto;
+  }
+
+  html.web .map-chrome--bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    padding: 0 var(--safe-r) 8px var(--safe-l);
+    z-index: 500;
+    translate: 0 calc(-1 * var(--deck-detent));
+    transition: translate var(--deck-dur) var(--deck-ease);
+    pointer-events: none;
+  }
+
+  html.web .map-chrome--bottom > * {
+    pointer-events: auto;
+  }
+
+  /* At FULL the map is a 12svh sliver; hide the chrome rather than stack it
+     on top of that sliver. Both are still one tap away (drop to HALF). */
+  html.web[data-detent="full"] .map-chrome--rail,
+  html.web[data-detent="full"] .map-chrome--bottom {
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity var(--deck-dur) var(--deck-ease),
+      visibility 0s linear var(--deck-dur);
+  }
+
+  /* --- F4. TOP RAIL CONTENTS ----------------------------------
+     Replaces five independently absolutely-positioned elements that collide
+     at 390px: .layer-control (~450px at top:16/left:16), .radar-timestamp
+     (top:16/right:16), .audio-toggle (top:16/right:180 => x~174, dead centre
+     of a 390px screen), .feature-toggles (top:60/left:16) and
+     .lightning-count (top:60/right:16). */
+
+  html.web .broadcast-layout .radar-timestamp {
+    position: static;
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  html.web .broadcast-layout .audio-toggle {
+    position: static;
+    order: 2;
+    flex: 0 0 auto;
+  }
+
+  html.web .deck-tools-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    order: 3;
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgb(10 10 10 / 0.92);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  html.web .broadcast-layout .lightning-count {
+    position: static;
+    order: 5;
+    animation: none;
+  }
+
+  /* Product chip strip: one tap for the most frequent map action. */
+  html.web .broadcast-layout .layer-control {
+    position: static;
+    order: 4;
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 0;
+    box-shadow: none;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  html.web .layer-control::-webkit-scrollbar {
+    display: none;
+  }
+
+  html.web .layer-control-btn {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    min-height: 44px;
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+
+  /* Wind + LSR are duplicated by the six MapToolsSheet rows, bound to the
+     SAME signals. Hide, do not fork. */
+  html.web .layer-control-btn--toggle {
+    display: none;
+  }
+
+  /* The desktop corner widget is fully replaced by .deck-tools-sheet. */
+  html.web .feature-toggles {
+    display: none;
+  }
+
+  /* --- F5. RIGHT RAIL ----------------------------------------- */
+
+  html.web .broadcast-layout .zoom-controls {
+    position: static;
+    gap: 12px;
+  }
+
+  html.web .zoom-controls button {
+    width: 48px;
+    height: 48px;
+  }
+
+  html.web .mini-map-toggle {
+    position: static;
+    width: 48px;
+    height: 48px;
+  }
+
+  /* MiniMap becomes a full-width card, not a 200x150 corner box. It mounts
+     only when toggled, so the second WebGL context stays on demand. */
+  html.web .mini-map-container {
+    position: fixed;
+    inset-inline: var(--safe-l) var(--safe-r);
+    inset-block-start: calc(var(--safe-t) + 104px);
+    width: auto;
+    aspect-ratio: 16 / 9;
+    height: auto;
+    z-index: 530;
+  }
+
+  html.web .mini-map {
+    height: calc(100% - 28px);
+  }
+
+  /* --- F6. BOTTOM STACK --------------------------------------- */
+  /* Order inside .map-chrome--bottom: hourly, legend chip, transport. */
+
+  html.web .broadcast-layout .hourly-forecast {
+    position: static;
+    order: 1;
+    height: auto;
+    padding: 8px;
+    border-radius: 12px;
+    background: rgb(10 10 10 / 0.92);
+  }
+
+  html.web .hourly-scroll {
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+  }
+
+  html.web .hour-item {
+    scroll-snap-align: start;
+  }
+
+  html.web .hour-conditions {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    max-width: 9ch;
+    overflow-wrap: anywhere;
+  }
+
+  html.web .deck-legend-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    order: 2;
+    align-self: flex-start;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgb(10 10 10 / 0.92);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  /* The `right: 300px` legend clearance computes to 74px of usable width at
+     390px and goes NEGATIVE below 332px. Delete it - the legend is no longer
+     in this band. */
+  html.web .broadcast-layout .animation-controls {
+    position: static;
+    order: 3;
+    right: auto;
+    left: auto;
+    bottom: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+
+  html.web .animation-controls > * {
+    order: 1;
+  }
+
+  html.web .animation-controls button {
+    width: 48px;
+    height: 48px;
+  }
+
+  html.web .speed-control {
+    margin-inline-start: auto;
+  }
+
+  html.web .timeline-container {
+    order: 2;
+    flex: 1 0 100%;
+  }
+
+  /* Scrubber hit area - NOT gated on `pointer: coarse`. WCAG 2.2 SC 2.5.8
+     (24x24) has no pointer-type exemption, and the deck layout is reached
+     with a FINE pointer too: 1280x1024 at 400% browser zoom is a 320px
+     viewport reporting `pointer: fine` / `hover: hover`, which is exactly
+     the SC 1.4.10 reflow test case. Without this the target there is the
+     8px-tall .timeline-bar.
+     `inset-block` is a top+bottom shorthand, so it precedes `top: 50%`. */
+  html.web .timeline-bar {
+    overflow: visible;
+  }
+
+  html.web .timeline-range {
+    inset-block: 50% auto;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+
+  html.web .timeline-handle {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Legend leaves the map surface entirely; the chip opens it. */
+  html.web .broadcast-layout .radar-legend {
+    position: static;
+    bottom: auto;
+    right: auto;
+  }
+
+  html.web .radar-legend-color {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  html.web .radar-legend-labels {
+    font-size: 11px;
+  }
+
+  html.web .velocity-legend .velocity-note {
+    white-space: normal;
+    max-width: none;
+    font-size: 11px;
+  }
+
+  html.web .deck-legend-sheet {
+    display: block;
+    position: fixed;
+    inset-inline: var(--safe-l) var(--safe-r);
+    inset-block-end: calc(var(--deck-detent) + 8px);
+    z-index: 800;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgb(10 10 10 / 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    translate: 0 8px;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      translate var(--deck-dur) var(--deck-ease),
+      opacity var(--deck-dur) var(--deck-ease),
+      visibility 0s linear var(--deck-dur);
+  }
+
+  html.web .deck-legend-sheet[data-open="true"] {
+    translate: 0 0;
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
+  /* --- F7. TOOLS SHEET ---------------------------------------- */
+
+  html.web .deck-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 780;
+    background: transparent;
+    border: 0;
+    padding: 0;
+  }
+
+  html.web .deck-backdrop:not([data-open="true"]) {
+    display: none;
+  }
+
+  html.web .deck-tools-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: fixed;
+    inset-inline: var(--safe-l) var(--safe-r);
+    /* Must ride above the deck sheet's current detent, exactly like
+       .deck-legend-sheet does. Anchoring to --safe-b instead put the sheet's
+       lower rows underneath the peek strip, where they were unreachable. */
+    inset-block-end: calc(var(--deck-detent) + 8px);
+    max-height: calc(100svh - var(--deck-detent) - var(--safe-b) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: 800;
+    padding: 16px;
+    border-radius: 16px;
+    background: rgb(10 10 10 / 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    translate: 0 calc(100% + var(--safe-b));
+    visibility: hidden;
+    transition:
+      translate var(--deck-dur) var(--deck-ease),
+      visibility 0s linear var(--deck-dur);
+  }
+
+  html.web .deck-tools-sheet[data-open="true"] {
+    translate: 0 0;
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
+  html.web .deck-tools-title {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  html.web .deck-tools-group-title {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  html.web .deck-tools-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 0 4px;
+    cursor: pointer;
+    position: relative;
+  }
+
+  html.web .deck-tools-row input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+  }
+
+  html.web .deck-tools-row-icon {
+    flex: 0 0 auto;
+    font-size: 18px;
+    width: 24px;
+    text-align: center;
+  }
+
+  html.web .deck-tools-row-label {
+    flex: 1 1 auto;
+    font-size: 15px;
+    min-width: 0;
+  }
+
+  html.web .deck-tools-row-badge {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+  }
+
+  html.web .deck-tools-switch {
+    flex: 0 0 auto;
+    width: 48px;
+    height: 28px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.15);
+    position: relative;
+    transition: background 0.2s ease;
+  }
+
+  html.web .deck-tools-switch::after {
+    content: "";
+    position: absolute;
+    inset-block-start: 3px;
+    inset-inline-start: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    transition: translate 0.2s ease;
+  }
+
+  html.web .deck-tools-row input:checked ~ .deck-tools-switch {
+    background: var(--accent-blue);
+  }
+
+  html.web .deck-tools-row input:checked ~ .deck-tools-switch::after {
+    translate: 20px 0;
+  }
+
+  html.web .deck-tools-row input:focus-visible ~ .deck-tools-switch {
+    outline: 3px solid #fff;
+    outline-offset: 2px;
+  }
+
+  html.web .deck-tools-close,
+  html.web .deck-legend-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: flex-end;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  html.web .deck-unsupported-note {
+    display: block;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-muted);
+  }
+
+  /* --- F8. MAP POPUPS DOCK ------------------------------------ */
+  /* RadarMap stops writing inline left/top on coarse pointers and sets
+     data-anchor="dock" instead, so CSS can take over. */
+
+  html.web .storm-report-popup[data-anchor="dock"],
+  html.web .alert-popup[data-anchor="dock"] {
+    position: fixed;
+    inset-inline: var(--safe-l) var(--safe-r);
+    inset-block-end: calc(var(--deck-detent) + 8px);
+    left: auto;
+    top: auto;
+    transform: none;
+    max-width: none;
+    min-width: 0;
+    z-index: 560;
+  }
+
+  html.web .storm-report-popup[data-anchor="dock"] .popup-arrow,
+  html.web .alert-popup[data-anchor="dock"] .popup-arrow {
+    display: none;
+  }
+
+  /* Hover tooltips have no touch equivalent and get stuck on iOS Safari. */
+  html.web .alert-tooltip {
+    display: none;
+  }
+
+  /* --- F9. THE SHEET ------------------------------------------ */
+
+  html.web .deck-sheet {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    height: var(--deck-full);
+    z-index: 700;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    border-start-start-radius: 16px;
+    border-start-end-radius: 16px;
+    box-shadow: 0 -8px 32px rgb(0 0 0 / 0.6);
+    padding-inline: var(--safe-l) var(--safe-r);
+    padding-block-end: var(--safe-b);
+    translate: 0 calc(var(--deck-full) - var(--deck-detent));
+    transition: translate var(--deck-dur) var(--deck-ease);
+    overscroll-behavior: contain;
+  }
+
+  html.web .deck-sheet[data-dragging="true"] {
+    transition: none;
+  }
+
+  html.web .deck-sheet-header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "brand grip"
+      "ticker ticker";
+    align-items: center;
+    column-gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  html.web .deck-header-brand {
+    display: block;
+    grid-area: brand;
+    padding-inline-start: 4px;
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent-blue);
+  }
+
+  html.web .deck-grip {
+    display: grid;
+    place-items: center;
+    grid-area: grip;
+    width: 100%;
+    height: 48px;
+    background: transparent;
+    border: 0;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  html.web .deck-grip-bar {
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgb(255 255 255 / 0.35);
+  }
+
+  html.web .ticker-slot {
+    display: block;
+    grid-area: ticker;
+  }
+
+  html.web .broadcast-layout .alert-ticker {
+    position: static;
+    height: auto;
+    min-height: 0;
+    border-top: 0;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0 8px;
+    overflow: visible;
+    background: transparent;
+  }
+
+  /* Only suppress the marquee when the stacked list is actually rendered. */
+  html.web .alert-ticker:has(.ticker-list) .ticker-content {
+    display: none;
+  }
+
+  html.web .ticker-label {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    flex: 0 0 auto;
+    max-width: 44%;
+    height: auto;
+  }
+
+  /* No .ticker-pause sizing here: the deck renders a static stacked list, not a
+     marquee, so islands/NewsTicker.tsx does not render the control at all. */
+
+  html.web .ticker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  html.web .ticker-list-item {
+    font-size: 13px;
+    line-height: 1.35;
+    padding: 6px 0;
+  }
+
+  /* At PEEK the sheet is collapsed to the grab handle alone, so the header's
+     other two rows are not rendered. Everything here is one drag (or one tap
+     on the handle) away at HALF - nothing is hidden permanently. */
+  html.web[data-detent="peek"] .deck-header-brand,
+  html.web[data-detent="peek"] .ticker-slot {
+    display: none;
+  }
+
+  /* Above PEEK the ticker shows its first item; the rest is revealed at FULL. */
+  html.web[data-detent="half"] .ticker-list-item:nth-child(n + 2) {
+    display: none;
+  }
+
+  html.web .deck-sheet-body {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Only scrollable at FULL: at peek/half the gesture belongs to the sheet,
+     which is the maps-app contract and removes the "sheet becomes
+     undraggable after any content scroll" failure. */
+  html.web:not([data-detent="full"]) .deck-sheet-body {
+    overflow-y: hidden;
+  }
+
+  html.web .deck-sheet-body .sidebar {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    background: transparent;
+    border-right: 0;
+    height: auto;
+  }
+
+  html.web .deck-pane {
+    display: block;
+    min-width: 0;
+    border-top: 1px solid var(--border-color);
+  }
+
+  html.web .deck-pane--now {
+    order: 1;
+    border-top: 0;
+  }
+
+  html.web .deck-pane--cities {
+    order: 2;
+  }
+
+  html.web .deck-pane--summary {
+    order: 3;
+  }
+
+  html.web .deck-pane--sky {
+    order: 4;
+  }
+
+  html.web .deck-pane--clock {
+    order: 5;
+  }
+
+  html.web .deck-pane--brand {
+    order: 6;
+  }
+
+  /* .conditions and .city-forecast-list are both flex:1 children of a
+     definite-height sidebar today. In an auto-height stack they must not
+     compete. */
+  html.web .broadcast-layout .conditions,
+  html.web .broadcast-layout .city-forecast-list {
+    flex: none;
+    overflow: visible;
+    background: transparent;
+  }
+
+  html.web .broadcast-layout .clock,
+  html.web .broadcast-layout .sun-moon-widget,
+  html.web .broadcast-layout .branding {
+    background: transparent;
+  }
+
+  html.web .broadcast-layout .city-forecast-list,
+  html.web .broadcast-layout .branding {
+    border-top: 0;
+    border-bottom: 0;
+  }
+
+  html.web .weather-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  html.web .data-freshness-reason {
+    display: inline;
+    font-size: 12px;
+  }
+
+  html.web .city-item {
+    min-height: 48px;
+    align-items: center;
+  }
+
+  html.web .city-hourly-conditions {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  /* Per-city hourly: today left:180px/width:380px puts ~170px off-screen at
+     390px, making per-city hourly data UNREACHABLE. .deck-sheet carries a
+     `translate`, so it is the containing block here and this becomes an
+     explicit in-sheet drill-down. */
+  html.web .city-hourly-panel {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-height: none;
+    z-index: 20;
+    border-right: 0;
+  }
+
+  html.web .city-hourly-close {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* --- F10. TEXT ALTERNATIVE BECOMES VISIBLE ------------------ */
+
+  html.web .radar-text-alt {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    padding: 16px;
+  }
+
+  html.web .radar-text-alt-title {
+    font-family: var(--font-display);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-blue);
+    margin-bottom: 8px;
+  }
+
+  html.web .radar-text-alt-group {
+    margin-bottom: 12px;
+  }
+
+  html.web .radar-text-alt-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  html.web .radar-text-alt-empty {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  /* --- F11. ALERT OVERLAY ------------------------------------- */
+  /* Today: position:fixed; width:1920px; height:1080px - 1530px too wide on
+     a 390px screen, and the highest-stakes content in the app. */
+
+  html.web .alert-overlay {
+    inset: 0;
+    width: auto;
+    height: 100svh;
+    z-index: 1000;
+    padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+  }
+
+  html.web .alert-overlay-content {
+    max-width: none;
+    padding: 24px;
+  }
+
+  html.web .alert-overlay-icon {
+    font-size: clamp(3rem, 2rem + 5vw, 7.5rem);
+    margin-bottom: 16px;
+  }
+
+  html.web .alert-overlay-event {
+    font-size: clamp(2rem, 1.4rem + 3vw, 4.5rem);
+    margin-bottom: 16px;
+  }
+
+  html.web .alert-overlay-headline {
+    font-size: clamp(1.125rem, 1rem + 1vw, 2rem);
+  }
+
+  html.web .alert-overlay-area {
+    font-size: clamp(0.9375rem, 0.85rem + 0.5vw, 1.5rem);
+  }
+
+  html.web .alert-overlay-close {
+    width: 48px;
+    height: 48px;
+    top: max(24px, calc(env(safe-area-inset-top, 0px) + 8px));
+    right: max(24px, calc(env(safe-area-inset-right, 0px) + 8px));
+  }
+
+  /* A dismissed alert must always be re-openable (requirement 3: nothing is
+     permanently hidden).
+     MARKUP CONTRACT - islands/AlertOverlay.tsx must render, whenever the
+     overlay has been dismissed AND an alert is still active:
+       <button type="button" class="deck-alert-chip deck-only" ...>
+     that clears the dismissed state. These rules are inert until it does
+     (`.deck-only` is display:none in broadcast.css). */
+  html.web .deck-alert-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    position: fixed;
+    inset-inline-end: var(--safe-r);
+    inset-block-end: calc(var(--deck-detent) + 8px);
+    z-index: 640;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: var(--alert-severe);
+    color: #000;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  /* --- F12. TYPE FLOORS (site route only; OBS keeps its values) --- */
+
+  html.web :is(.radar-legend-labels, .timeline-labels, .sun-time-label, .moon-illum-text, .velocity-legend-labels, .wind-legend-labels, .report-recent-badge, .city-hourly-precip .drop, .hour-precip .drop, .sun-marker-emoji, .velocity-note) {
+    font-size: 11px;
+  }
+
+  html.web :is(.station-name, .radar-legend-title, .speed-control button, .data-freshness, .range-ring-label, .sun-time-value, .mini-map-header, .hour-time, .hour-precip, .report-time, .report-location, .alert-popup-area, .alert-popup-expires, .city-hourly-day-separator, .wind-legend-title, .report-type, .report-details, .storm-reports-badge) {
+    font-size: 12px;
+  }
+
+  html.web .temperature-value {
+    font-size: clamp(2.5rem, 1.62rem + 3.93vw, 4rem);
+  }
+
+  html.web .temperature-unit {
+    font-size: clamp(1.25rem, 1rem + 1.2vw, 2rem);
+  }
+
+  html.web .clock-time {
+    font-size: clamp(1.25rem, 1.1rem + 0.8vw, 1.75rem);
+  }
+
+  html.web .ticker-item {
+    font-size: 14px;
+    padding: 0 16px;
+  }
+}
+
+/* ============================================================
+   G - PHONE / COMPACT / TABLET / LANDSCAPE DELTAS
+   ============================================================ */
+
+@media (max-width: 47.999rem) {
+  html.web .weather-details {
+    grid-template-columns: 1fr;
+  }
+
+  html.web .map-chrome--top {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 29.999rem) {
+  /* --deck-peek is intentionally NOT reduced here: it is already just the grab
+     handle, and shrinking the handle would fail the target-size rule. */
+
+  html.web .deck-tools-btn {
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  html.web .broadcast-layout .radar-timestamp {
+    font-size: 11px;
+  }
+
+  /* All three speed buttons stay reachable at this width. .animation-controls
+     is flex-wrap: wrap, so .speed-control drops to its own row when the
+     transport row and the speed row no longer fit side by side (~320px)
+     instead of 0.5x being hidden with no alternative path to it. */
+  html.web .speed-control {
+    margin-inline-start: 0;
+  }
+
+  html.web .layer-control-btn {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+}
+
+@media (min-width: 48rem) and (max-width: 63.999rem) {
+  html.web {
+    /* --deck-peek stays the grab-handle constant from the base block. */
+    --deck-half: 46svh;
+    --deck-full: 84svh;
+  }
+
+  html.web .weather-details {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  html.web .city-list-items {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  html.web .sun-times {
+    display: flex;
+    gap: 16px;
+  }
+
+  html.web .deck-tools-sheet {
+    inset-inline: auto var(--safe-r);
+    width: min(380px, 46vw);
+  }
+
+  html.web .deck-legend-sheet {
+    inset-inline: auto var(--safe-r);
+    width: min(420px, 52vw);
+  }
+
+  html.web .zoom-controls button {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* SHORT VIEWPORT, still in the deck. Vertical budget at 320x640 with the
+   hourly strip on: 180px peek + ~298px bottom stack + ~104px top chrome
+   leaves ~58px, and the rail's natural column (3 zoom buttons at 48 + 12
+   gaps + a 48px mini-map toggle = ~228px) does not fit - it would run off
+   the top of the screen. Lay it out as a right-aligned ROW instead: ~48px
+   tall, ~228px wide, which fits inside 320px with room to spare. Above
+   736px of viewport height the column has room, so it stays a column. */
+@media (max-width: 63.999rem) and (max-height: 46rem) {
+  html.web .map-chrome--rail {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  html.web .broadcast-layout .zoom-controls {
+    flex-direction: row;
+    gap: 8px;
+  }
+}
+
+/* Rotating a phone to see more radar must not be punished: a 26svh bottom
+   sheet on a 390px-tall viewport would leave ~290px of map. */
+@media (max-height: 32rem) and (orientation: landscape) {
+  html.web .deck-sheet {
+    inset: 0 0 0 auto;
+    width: min(380px, 46vw);
+    height: 100svh;
+    border-start-start-radius: 16px;
+    border-end-start-radius: 16px;
+    border-start-end-radius: 0;
+    border-top: 0;
+    border-left: 1px solid var(--border-color);
+    translate: calc(100% - 56px) 0;
+    padding-inline-end: var(--safe-r);
+  }
+
+  html.web[data-detent="half"] .deck-sheet,
+  html.web[data-detent="full"] .deck-sheet {
+    translate: 0 0;
+  }
+
+  html.web .deck-sheet-header {
+    grid-template-columns: 48px 1fr;
+    grid-template-areas:
+      "grip brand"
+      "grip ticker";
+  }
+
+  html.web .deck-grip {
+    width: 48px;
+    height: 100%;
+  }
+
+  html.web .deck-grip-bar {
+    width: 4px;
+    height: 40px;
+  }
+
+  html.web .map-chrome--bottom,
+  html.web .map-chrome--rail {
+    translate: 0 0;
+    inset-inline-end: calc(56px + var(--safe-r));
+  }
+
+  html.web .map-chrome--bottom {
+    inset-inline-start: var(--safe-l);
+  }
+
+  html.web[data-detent="half"] .map-chrome--bottom,
+  html.web[data-detent="full"] .map-chrome--bottom,
+  html.web[data-detent="half"] .map-chrome--rail,
+  html.web[data-detent="full"] .map-chrome--rail {
+    opacity: 1;
+    visibility: visible;
+    inset-inline-end: calc(min(380px, 46vw) + 8px);
+  }
+
+  html.web .map-chrome--rail {
+    inset-block-end: 88px;
+  }
+
+  /* Everything that hangs off --deck-detent is re-anchored to the rail. */
+  html.web .deck-legend-sheet,
+  html.web .storm-report-popup[data-anchor="dock"],
+  html.web .alert-popup[data-anchor="dock"] {
+    inset-inline: var(--safe-l) calc(56px + var(--safe-r));
+    inset-block-end: calc(var(--safe-b) + 8px);
+  }
+
+  html.web .deck-alert-chip {
+    inset-inline-end: calc(56px + var(--safe-r));
+    inset-block-end: calc(var(--safe-b) + 8px);
+  }
+
+  html.web[data-detent="half"] .deck-legend-sheet,
+  html.web[data-detent="full"] .deck-legend-sheet,
+  html.web[data-detent="half"] .deck-alert-chip,
+  html.web[data-detent="full"] .deck-alert-chip {
+    inset-inline-end: calc(min(380px, 46vw) + 8px);
+  }
+
+  html.web .deck-tools-sheet {
+    inset-inline: auto calc(56px + var(--safe-r));
+    width: min(360px, 52vw);
+    max-height: calc(100svh - 16px);
+  }
+
+  html.web .mini-map-container {
+    inset-inline: auto calc(56px + var(--safe-r));
+    width: min(320px, 44vw);
+  }
+}
+
+/* ============================================================
+   H - EXPLICIT DESKTOP RESTORE: 64rem and up
+   broadcast.css is already correct here. These are ASSERTIONS: they
+   restate the inert state so a stray rule cannot leak upward.
+   ============================================================ */
+
+@media (min-width: 64rem) {
+  html.web .deck-sheet,
+  html.web .deck-sheet-header,
+  html.web .deck-sheet-body,
+  html.web .deck-pane,
+  html.web .ticker-slot,
+  html.web .map-chrome,
+  html.web .deck-legend-sheet {
+    display: contents;
+  }
+
+  html.web .deck-only,
+  html.web .ticker-list {
+    display: none;
+  }
+
+  html.web .hour-conditions,
+  html.web .city-hourly-conditions,
+  html.web .deck-unsupported-note {
+    display: none;
+  }
+
+  html.web .radar-text-alt {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  html.web .storm-report-popup[data-anchor="dock"],
+  html.web .alert-popup[data-anchor="dock"] {
+    position: absolute;
+  }
+
+  /* The unpin makes the shell exactly viewport-tall, so a short desktop
+     (1280x720, or a 1440x900 laptop with a large browser chrome) can now
+     overflow the sidebar column. At 1920x1080 it does not overflow, so this
+     paints no scrollbar and the broadcast render is pixel-identical.
+     Safe for .city-hourly-panel: that panel is position:fixed and .sidebar
+     is not a containing block for it, so it is not clipped. */
+  html.web .broadcast-layout .sidebar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}

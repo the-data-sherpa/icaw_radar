@@ -7,10 +7,17 @@ interface FeatureTogglesProps {
   showWind: Signal<boolean>;
   showMiniMap: Signal<boolean>;
   showHourly: Signal<boolean>;
+  /**
+   * Labels of features this rendering backend cannot provide. Matching rows
+   * render disabled with a visible explanation instead of silently no-oping.
+   * Empty/undefined on the WebGL path, so that render is unchanged.
+   */
+  unavailable?: string[];
 }
 
 export function FeatureToggles(props: FeatureTogglesProps) {
   const expanded = useSignal(false);
+  const unavailable = props.unavailable ?? [];
 
   const features = [
     {
@@ -54,25 +61,35 @@ export function FeatureToggles(props: FeatureTogglesProps) {
         title="Toggle feature options"
         aria-label="Toggle feature options"
         aria-expanded={expanded.value}
+        aria-controls="feature-options"
       >
         {String.fromCodePoint(0x2699, 0xFE0F)}
       </button>
       {expanded.value && (
-        <div class="feature-toggles-panel" role="menu">
-          {features.map((f) => (
-            <label key={f.label} class="feature-toggle-item">
-              <input
-                type="checkbox"
-                checked={f.signal.value}
-                onChange={() => (f.signal.value = !f.signal.value)}
-                aria-label={`Toggle ${f.label}`}
-              />
-              <span class="icon" aria-hidden="true">
-                {f.icon}
-              </span>
-              <span class="label">{f.label}</span>
-            </label>
-          ))}
+        <div class="feature-toggles-panel" role="menu" id="feature-options">
+          {features.map((f) => {
+            const off = unavailable.includes(f.label);
+            return (
+              <label key={f.label} class="feature-toggle-item">
+                <input
+                  type="checkbox"
+                  checked={f.signal.value && !off}
+                  disabled={off}
+                  onChange={() => (f.signal.value = !f.signal.value)}
+                  aria-label={`Toggle ${f.label}`}
+                />
+                <span class="icon" aria-hidden="true">
+                  {f.icon}
+                </span>
+                <span class="label">{f.label}</span>
+                {off && (
+                  <span class="deck-unsupported-note">
+                    Not available without WebGL
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
       )}
     </div>

@@ -28,6 +28,22 @@ interface Particle {
   speed: number;
 }
 
+/** Precomputed wind vectors on a coarse canvas-space lattice. */
+interface WindGrid {
+  cols: number;
+  rows: number;
+  cellW: number;
+  cellH: number;
+  dx: Float32Array;
+  dy: Float32Array;
+  speed: Float32Array;
+}
+
+// One lattice sample every ~40 CSS px. The wind data itself is far coarser
+// than that, so this loses no detail while turning an O(particles x stations)
+// per-frame cost into an O(lattice x stations) cost per bounds change.
+const GRID_CELL_PX = 40;
+
 // Bilinear interpolation for smooth wind field
 function interpolateWind(
   x: number,
@@ -95,6 +111,77 @@ function interpolateWind(
   };
 }
 
+/** Samples interpolateWind onto a coarse lattice once, instead of per particle. */
+function buildWindGrid(
+  width: number,
+  height: number,
+  windData: WindPoint[],
+  mapBounds: MapBounds,
+): WindGrid {
+  const cols = Math.max(2, Math.ceil(width / GRID_CELL_PX) + 1);
+  const rows = Math.max(2, Math.ceil(height / GRID_CELL_PX) + 1);
+  const cellW = width / (cols - 1);
+  const cellH = height / (rows - 1);
+
+  const dx = new Float32Array(cols * rows);
+  const dy = new Float32Array(cols * rows);
+  const speed = new Float32Array(cols * rows);
+
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const w = interpolateWind(
+        i * cellW,
+        j * cellH,
+        width,
+        height,
+        windData,
+        mapBounds,
+      );
+      const k = j * cols + i;
+      dx[k] = w.dx;
+      dy[k] = w.dy;
+      speed[k] = w.speed;
+    }
+  }
+
+  return { cols, rows, cellW, cellH, dx, dy, speed };
+}
+
+/** Bilinear lookup into the precomputed lattice. */
+function sampleGrid(
+  grid: WindGrid,
+  x: number,
+  y: number,
+): { dx: number; dy: number; speed: number } {
+  const gx = Math.min(Math.max(x / grid.cellW, 0), grid.cols - 1);
+  const gy = Math.min(Math.max(y / grid.cellH, 0), grid.rows - 1);
+  const i0 = Math.floor(gx);
+  const j0 = Math.floor(gy);
+  const i1 = Math.min(i0 + 1, grid.cols - 1);
+  const j1 = Math.min(j0 + 1, grid.rows - 1);
+  const fx = gx - i0;
+  const fy = gy - j0;
+
+  const k00 = j0 * grid.cols + i0;
+  const k10 = j0 * grid.cols + i1;
+  const k01 = j1 * grid.cols + i0;
+  const k11 = j1 * grid.cols + i1;
+
+  const w00 = (1 - fx) * (1 - fy);
+  const w10 = fx * (1 - fy);
+  const w01 = (1 - fx) * fy;
+  const w11 = fx * fy;
+
+  return {
+    dx: grid.dx[k00] * w00 + grid.dx[k10] * w10 + grid.dx[k01] * w01 +
+      grid.dx[k11] * w11,
+    dy: grid.dy[k00] * w00 + grid.dy[k10] * w10 + grid.dy[k01] * w01 +
+      grid.dy[k11] * w11,
+    speed: grid.speed[k00] * w00 + grid.speed[k10] * w10 +
+      grid.speed[k01] * w01 + grid.speed[k11] * w11,
+  };
+}
+
 // Get color based on wind speed (Windy.com style gradient)
 function getWindColor(speed: number): string {
   // Speed in mph - adjust thresholds as needed
@@ -109,10 +196,27 @@ function getWindColor(speed: number): string {
   return "rgba(190, 30, 98, 0.95)"; // Magenta - storm
 }
 
+/** Device-appropriate particle budget. 3000 melts a mid-range phone. */
+function particleBudget(): number {
+  const coarse = globalThis.matchMedia?.("(pointer: coarse)").matches ?? false;
+  if (coarse) return 600;
+  return (navigator.hardwareConcurrency ?? 4) >= 8 ? 3000 : 1500;
+}
+
 export function WindField({ windData, mapBounds, isVisible }: WindFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const animationIdRef = useRef<number>(0);
+  // mapBounds is a NEW object on every moveend. Keeping it in the effect's
+  // dependency array tore down and reallocated the particle system, the
+  // offscreen trail canvas and the ResizeObserver after every pan flick.
+  const boundsRef = useRef<MapBounds>(mapBounds);
+  const rebuildGridRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    boundsRef.current = mapBounds;
+    rebuildGridRef.current();
+  }, [mapBounds]);
 
   useEffect(() => {
     if (!isVisible || !canvasRef.current) {
@@ -128,6 +232,10 @@ export function WindField({ windData, mapBounds, isVisible }: WindFieldProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const reduceMotion =
+      globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ??
+        false;
+
     // Set canvas size to match container
     const updateCanvasSize = () => {
       const parent = canvas.parentElement;
@@ -139,12 +247,15 @@ export function WindField({ windData, mapBounds, isVisible }: WindFieldProps) {
     updateCanvasSize();
 
     // Particle settings - adjusted for visual appeal
-    const PARTICLE_COUNT = 3000;
+    const PARTICLE_COUNT = particleBudget();
     const BASE_MAX_AGE = 80;
     const AGE_VARIANCE = 40;
 
     // Initialize particles if empty or count changed significantly
-    if (particlesRef.current.length < PARTICLE_COUNT * 0.5) {
+    if (
+      particlesRef.current.length < PARTICLE_COUNT * 0.5 ||
+      particlesRef.current.length > PARTICLE_COUNT * 1.5
+    ) {
       particlesRef.current = [];
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         particlesRef.current.push({
@@ -172,14 +283,29 @@ export function WindField({ windData, mapBounds, isVisible }: WindFieldProps) {
     trailCtx.fillStyle = "rgba(0, 0, 0, 0)";
     trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
 
+    let grid: WindGrid = buildWindGrid(
+      canvas.width,
+      canvas.height,
+      windData,
+      boundsRef.current,
+    );
+    const rebuildGrid = () => {
+      if (canvas.width === 0 || canvas.height === 0) return;
+      grid = buildWindGrid(
+        canvas.width,
+        canvas.height,
+        windData,
+        boundsRef.current,
+      );
+    };
+    rebuildGridRef.current = rebuildGrid;
+
     let lastTime = performance.now();
 
-    function animate(currentTime: number) {
+    /** One integration + draw pass. Shared by the rAF loop and the static
+     * reduced-motion render. */
+    function step(deltaTime: number) {
       if (!ctx || !trailCtx || !canvas) return;
-
-      // Calculate delta time for smooth animation
-      const deltaTime = Math.min((currentTime - lastTime) / 16.67, 2); // Cap at 2x speed
-      lastTime = currentTime;
 
       // Fade existing trails - this creates the flowing effect
       trailCtx.globalCompositeOperation = "destination-out";
@@ -189,14 +315,7 @@ export function WindField({ windData, mapBounds, isVisible }: WindFieldProps) {
 
       // Update and draw particles
       for (const p of particles) {
-        const wind = interpolateWind(
-          p.x,
-          p.y,
-          canvas.width,
-          canvas.height,
-          windData,
-          mapBounds,
-        );
+        const wind = sampleGrid(grid, p.x, p.y);
 
         const prevX = p.x;
         const prevY = p.y;
@@ -274,45 +393,71 @@ export function WindField({ windData, mapBounds, isVisible }: WindFieldProps) {
       // Copy trail canvas to main canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(trailCanvas, 0, 0);
+    }
 
+    function animate(currentTime: number) {
+      // Calculate delta time for smooth animation
+      const deltaTime = Math.min((currentTime - lastTime) / 16.67, 2); // Cap at 2x speed
+      lastTime = currentTime;
+      step(deltaTime);
       animationIdRef.current = requestAnimationFrame(animate);
     }
 
-    animationIdRef.current = requestAnimationFrame(animate);
+    /** Reduced motion: draw ONE static streamline snapshot and stop. The
+     * information (where the wind is and how fast) survives; the motion does
+     * not. */
+    function renderStatic() {
+      for (let i = 0; i < 40; i++) step(1);
+    }
+
+    const stop = () => {
+      if (animationIdRef.current) {
+        cancelAnimationFrame(animationIdRef.current);
+        animationIdRef.current = 0;
+      }
+    };
+
+    const start = () => {
+      if (reduceMotion) {
+        renderStatic();
+        return;
+      }
+      if (animationIdRef.current) return;
+      lastTime = performance.now();
+      animationIdRef.current = requestAnimationFrame(animate);
+    };
+
+    // Hard-stop while the tab is in the background: a backgrounded rAF loop
+    // still burns battery on mobile Safari during audio playback.
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else start();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    if (!document.hidden) start();
 
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       updateCanvasSize();
       trailCanvas.width = canvas.width;
       trailCanvas.height = canvas.height;
+      rebuildGrid();
+      if (reduceMotion && !document.hidden) renderStatic();
     });
     resizeObserver.observe(canvas.parentElement!);
 
     return () => {
-      if (animationIdRef.current) {
-        cancelAnimationFrame(animationIdRef.current);
-      }
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
       resizeObserver.disconnect();
+      rebuildGridRef.current = () => {};
     };
-  }, [windData, isVisible, mapBounds]);
+  }, [windData, isVisible]);
 
   if (!isVisible) return null;
 
-  return (
-    <canvas
-      ref={canvasRef}
-      class="wind-field-canvas"
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-        zIndex: 50,
-        opacity: 0.85,
-        mixBlendMode: "screen",
-      }}
-    />
-  );
+  // Positioning/compositing live in broadcast.css (.wind-field-canvas) so a
+  // stylesheet can reach them.
+  return <canvas ref={canvasRef} class="wind-field-canvas" />;
 }

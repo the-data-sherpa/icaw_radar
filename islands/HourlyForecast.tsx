@@ -66,7 +66,16 @@ export default function HourlyForecast() {
     if (hours.value.length > 0 && scrollRef.current) {
       const nowItem = scrollRef.current.querySelector(".hour-item.now");
       if (nowItem) {
-        nowItem.scrollIntoView({ behavior: "smooth", inline: "start" });
+        const reduceMotion =
+          globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ??
+            false;
+        // block: "nearest" keeps this from scrolling ANY ancestor vertically —
+        // inside the mobile sheet a default "start" would yank the sheet body.
+        nowItem.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+          inline: "start",
+          block: "nearest",
+        });
       }
     }
   }, [hours.value]);
@@ -96,7 +105,6 @@ export default function HourlyForecast() {
           <div
             key={i}
             class={`hour-item ${h.isNow ? "now" : ""}`}
-            title={h.conditions}
           >
             <span class="hour-time">{h.isNow ? "Now" : h.hour}</span>
             <span class="hour-icon">{getIconEmoji(h.icon)}</span>
@@ -107,6 +115,12 @@ export default function HourlyForecast() {
                 {h.precipChance}%
               </span>
             )}
+            {
+              /* Conditions text was title-only, i.e. unreachable on touch.
+                The emoji is not an equivalent: ICON_MAP collapses
+                drizzle/rain/showers onto the same glyph. */
+            }
+            <span class="hour-conditions">{h.conditions}</span>
           </div>
         ))}
       </div>

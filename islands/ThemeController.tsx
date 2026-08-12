@@ -94,20 +94,7 @@ export default function ThemeController({
     : "\u{1F319}"; // crescent moon emoji
 
   return (
-    <div
-      class="theme-indicator"
-      title={`Current theme: ${currentMode.value}`}
-      style={{
-        position: "fixed",
-        top: "8px",
-        left: "8px",
-        fontSize: "18px",
-        zIndex: 9999,
-        opacity: 0.7,
-        transition: "opacity 0.3s ease",
-        cursor: "default",
-      }}
-    >
+    <div class="theme-indicator" title={`Current theme: ${currentMode.value}`}>
       {modeEmoji}
     </div>
   );
